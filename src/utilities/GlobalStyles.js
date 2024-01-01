@@ -31,7 +31,7 @@ const GlobalStyles = StyleSheet.create({
     borderRadius: DIM.deviceWidth * 0.03,
     backgroundColor: Colors.MilkWhite,
     marginTop: DIM.deviceHeight * 0.01,
-    shadowColor:Colors.Black,
+    shadowColor: Colors.Black,
     elevation: Platform.OS == "android" ? 4 : 0,
     shadowOffset: {
       width: 0,
@@ -48,17 +48,10 @@ const GlobalStyles = StyleSheet.create({
     height: 46,
     fontSize: DIM.deviceFont * 16,
     borderRadius: DIM.deviceWidth * 0.02,
-    fontWeight:
-      strings._language == "en"
-        ? Platform.OS == "ios"
-          ? "400"
-          : "600"
-        : Platform.OS == "ios"
-        ? "400"
-        : "700",
+    fontWeight: "700",
     fontStyle: "normal",
     padding: 10,
-    // fontFamily: Font_Body, 
+    // fontFamily: Font_Body,
     color: FontColorChange() ? Colors.Charcoal : Colors.Black,
   },
   PasswordInputView: {
@@ -71,14 +64,7 @@ const GlobalStyles = StyleSheet.create({
     height: 46,
     fontSize: DIM.deviceFont * 16,
     borderRadius: DIM.deviceWidth * 0.02,
-    fontWeight:
-      strings._language == "en"
-        ? Platform.OS == "ios"
-          ? "400"
-          : "600"
-        : Platform.OS == "ios"
-        ? "400"
-        : "700",
+    fontWeight: "700",
     padding: 10,
     width: "85%",
     fontStyle: "normal",
@@ -87,4 +73,4 @@ const GlobalStyles = StyleSheet.create({
   },
 });
 
-export { GlobalStyles,FontColorChange };
+export { GlobalStyles, FontColorChange };
