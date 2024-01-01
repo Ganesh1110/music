@@ -4,7 +4,7 @@ import Dashboard from "./src/screens/dashboard/Dashboard";
 
 const App = () => {
   return (
-    <View>
+    <View style={{ flex: 1 }}>
       <Dashboard />
     </View>
   );
