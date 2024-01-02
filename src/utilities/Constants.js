@@ -30,7 +30,17 @@ const Gif = {
 };
 
 const Icons = {
-  // icons:require("../assets/icons/) format of the icons exports
+  IconBack: require("../assets/Icons/back.png"),
+  IconFillHeart: require("../assets/Icons/fill_heart.png"),
+  IconEmptyHeart: require("../assets/Icons/empty_heart.png"),
+  IconDownload: require("../assets/Icons/download.png"),
+  IconSpotify: require("../assets/Icons/spotify.png"),
+  IconYoutube: require("../assets/Icons/youtube.png"),
+  IconPlay: require("../assets/Icons/play.png"),
+  IconPause: require("../assets/Icons/pause.png"),
+  IconNext: require("../assets/Icons/next.png"),
+  IconShare: require("../assets/Icons/share.png"),
+  IconMore: require("../assets/Icons/more.png"),
 };
 
 const Images = {

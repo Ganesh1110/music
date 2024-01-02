@@ -40,7 +40,7 @@ const CustomHeader = ({
                   source={leftIconName}
                   style={[
                     GlobalStyles.iconSize,
-                    { tintColor: Colors.Gunmetal },
+                    { tintColor: Colors.MilkWhite },
                   ]}
                 />
               </TouchableOpacity>
@@ -60,7 +60,7 @@ const CustomHeader = ({
                 style={{
                   fontSize: DIM.deviceFont * 20,
                   fontWeight: "700",
-                  color: Colors.Charcoal,
+                  color: Colors.MilkWhite,
                   fontStyle: "normal",
                 }}
               >
@@ -82,7 +82,7 @@ const CustomHeader = ({
                   source={rightIconName}
                   style={[
                     GlobalStyles.iconSize,
-                    { tintColor: Colors.Gunmetal }, // if need transform use this transform: [{ scaleX: -1 }]
+                    { tintColor: Colors.MilkWhite },
                   ]}
                 />
               </TouchableOpacity>

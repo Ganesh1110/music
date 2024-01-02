@@ -1,12 +1,12 @@
 import React from "react";
-import { Text, View } from "react-native";
-import Dashboard from "./src/screens/dashboard/Dashboard";
+import RootNavigation from "./src/routes/RootNavigation";
+import { NavigationContainer } from "@react-navigation/native";
 
 const App = () => {
   return (
-    <View style={{ flex: 1 }}>
-      <Dashboard />
-    </View>
+    <NavigationContainer>
+      <RootNavigation />
+    </NavigationContainer>
   );
 };
 
