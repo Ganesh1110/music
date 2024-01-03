@@ -1,3 +1,4 @@
+import React from "react";
 import {
   Image,
   ImageBackground,
@@ -6,7 +7,6 @@ import {
   TouchableOpacity,
   View,
 } from "react-native";
-import React, { useMemo } from "react";
 import FastImage from "react-native-fast-image";
 import { FlashList } from "@shopify/flash-list";
 import { Colors, DIM, Icons } from "../../utilities/Constants";
@@ -95,7 +95,12 @@ const Dashboard = ({ navigation }) => {
 
   const RenderUI = ({ data }) => {
     return (
-      <View style={[styles.listView]}>
+      <TouchableOpacity
+        style={[styles.listView]}
+        onPress={() => {
+          navigationFunction(data);
+        }}
+      >
         <View style={styles.listInnerView}>
           <View
             style={{
@@ -123,8 +128,14 @@ const Dashboard = ({ navigation }) => {
             />
           </TouchableOpacity>
         </View>
-      </View>
+      </TouchableOpacity>
     );
+  };
+
+  const navigationFunction = (data) => {
+    if (data) {
+      navigation.navigate("MusicPlayer", { data: data });
+    }
   };
 
   const ListHeader = () => {
@@ -167,7 +178,7 @@ const Dashboard = ({ navigation }) => {
               contentContainerStyle={{
                 paddingBottom: DIM.deviceHeight * 0.012,
               }}
-              // ListHeaderComponent={ListHeader}
+              estimatedItemSize={100}
             />
           </>
         </View>
