@@ -1,44 +1,21 @@
-import mysql from "mysql2";
-import dotenv from "dotenv";
+import mysql from "mysql2/promise";
+import "dotenv/config";
 
-const ENV = dotenv.config()?.parsed;
-
-let pool;
+let DB_connection;
 
 try {
-  pool = mysql.createPool({
-    host: ENV?.MYSQL_HOST,
-    user: ENV?.MYSQL_USER,
-    password: ENV?.MYSQL_PASSWORD,
-    database: ENV?.MYSQL_DB,
-    port: ENV?.MYSQL_PORT,
-    waitForConnections: true,
-    connectionLimit: 10,
-    queueLimit: 0,
-    // allowPublicKeyRetrieval: true,
-    // ssl: false,
+  DB_connection = await mysql.createConnection({
+    host: process.env.DB_HOST,
+    user: process.env.DB_USER,
+    password: process.env.DB_PASSWORD,
+    database: process.env.DB_NAME,
   });
 
-  // Test connection
-  const testConnection = async () => {
-    try {
-      const connection = await pool.promise().getConnection();
-      console.log("✅ MySQL Connected:", {
-        host: process.env.MYSQL_HOST,
-        user: process.env.MYSQL_USER,
-        database: process.env.MYSQL_DB,
-      });
-      connection.release();
-    } catch (err) {
-      console.error("❌ MySQL Connection Error:", err.message);
-      process.exit(1); // stop server if DB fails
-    }
-  };
-
-  testConnection();
-} catch (err) {
-  console.error("❌ Pool Creation Error:", err.message);
-  process.exit(1);
+  console.log("✅ Connected to MySQL database!");
+} catch (error) {
+  console.error("❌ Failed to connect to MySQL database:", error.message);
+  // Re-throw the error to prevent the server from starting with a broken connection.
+  throw error;
 }
 
-export default pool.promise();
+export default DB_connection;
