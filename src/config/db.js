@@ -14,7 +14,6 @@ try {
   console.log("✅ Connected to MySQL database!");
 } catch (error) {
   console.error("❌ Failed to connect to MySQL database:", error.message);
-  // Re-throw the error to prevent the server from starting with a broken connection.
   throw error;
 }
 
