@@ -1,6 +1,6 @@
 import express from "express";
 import ytmusicRoutes from "./ytmusicRoutes.js";
-import getAudio from "./getAudioRoute.js";
+import getSong from "./getSongRoute.js";
 
 const router = express.Router();
 
@@ -20,6 +20,6 @@ router.get("/users", async (req, res) => {
 
 // ✅ Grouped Routes
 router.use("/ytmusic", ytmusicRoutes);
-router.use("/youtube", getAudio);
+router.use("/song", getSong);
 
 export default router;

@@ -36,6 +36,7 @@ export const getAudioUrl = async (req, res) => {
     );
 
     res.json({
+      success: true,
       title: info.videoDetails.title,
       author: info.videoDetails.author.name,
       thumbnail: info.videoDetails.thumbnails?.pop()?.url,
