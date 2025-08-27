@@ -2,8 +2,7 @@ import express from "express";
 import cors from "cors";
 import dotenv from "dotenv";
 import DB_connection from "./config/db.js";
-import ytmusicRoutes from "./routes/ytmusicRoutes.js";
-import youtubeRoutes from "./routes/youtubeRoutes.js";
+import routes from "./routes/index.js";
 
 dotenv.config();
 
@@ -16,27 +15,18 @@ app.use(express.json());
 // Default
 app.get("/", (req, res) => res.send("✅ Server is working"));
 
-// Time check
-app.get("/time", (req, res) => {
-  const currentTime = new Date().toISOString();
-  res.json({ serverTime: currentTime });
-});
+// // DB example
+// app.get("/users", async (req, res) => {
+//   try {
+//     const [rows] = await DB_connection.execute("SELECT * FROM users");
+//     res.json(rows);
+//   } catch (error) {
+//     console.error("Error fetching users:", error);
+//     res.status(500).json({ error: "Internal Server Error" });
+//   }
+// });
 
-// DB example
-app.get("/users", async (req, res) => {
-  try {
-    const [rows] = await DB_connection.execute("SELECT * FROM users");
-    res.json(rows);
-  } catch (error) {
-    console.error("Error fetching users:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-});
-
-// 🔥 YTMusic Routes
-app.use("/ytmusic", ytmusicRoutes);
-// YTMusic Url
-app.use("/youtube", youtubeRoutes);
+app.use("/", routes);
 
 app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
 

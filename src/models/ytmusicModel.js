@@ -1,5 +1,6 @@
 import YTMusic from "ytmusic-api";
 import ytdl from "@distube/ytdl-core";
+import { YT_WATCH_URL } from "../constant/constant.js";
 
 const ytmusic = new YTMusic();
 
@@ -35,7 +36,7 @@ export const getLyrics = async (videoId) => {
 
 export const getVideoDetails = async (videoId) => {
   try {
-    const url = `https://www.youtube.com/watch?v=${videoId}`;
+    const url = `${YT_WATCH_URL}?v=${videoId}`;
     const info = await ytdl.getInfo(url);
 
     return {

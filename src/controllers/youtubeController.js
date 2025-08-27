@@ -1,4 +1,5 @@
 import ytdl from "@distube/ytdl-core";
+import { YT_WATCH_URL } from "../constant/constant.js";
 
 /**
  * Get direct audio URL from YouTube (ad-free, highest quality)
@@ -11,7 +12,7 @@ export const getAudioUrl = async (req, res) => {
       return res.status(400).json({ error: "Video ID is required" });
     }
 
-    const url = `https://www.youtube.com/watch?v=${videoId}`;
+    const url = `${YT_WATCH_URL}/watch?v=${videoId}`;
 
     if (!ytdl.validateURL(url)) {
       return res.status(400).json({ error: "Invalid YouTube video ID" });
