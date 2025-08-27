@@ -1,28 +1,13 @@
 import Genius from "genius-lyrics";
 import {
-  searchSongs,
   getPlaylist,
   getLyrics,
-  searchAlbums,
   getVideoDetails,
 } from "../models/ytmusicModel.js";
 
 const geniusClient = new Genius.Client(process.env.GENIUS_CLIENT_ACCESS_TOKEN);
 
-export const searchMusic = async (req, res) => {
-  try {
-    const { query } = req.query;
-    if (!query)
-      return res.status(400).json({ error: "Parameter `query` is required" });
-
-    const results = await searchSongs(query);
-    res.json(results);
-  } catch (error) {
-    console.error("YTMusic search error:", error);
-    res.status(500).json({ error: "Failed to fetch music" });
-  }
-};
-
+// Fetch playlist by ID made the search music dynamic
 export const fetchPlaylist = async (req, res) => {
   try {
     const { id } = req.params;
