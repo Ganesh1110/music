@@ -1,20 +1,19 @@
 import mysql from "mysql2/promise";
 import "dotenv/config";
 
-let DB_connection;
+const DB_POOL = mysql.createPool({
+  host: process.env.DB_HOST,
+  user: process.env.DB_USER,
+  password: process.env.DB_PASSWORD,
+  database: process.env.DB_NAME,
+  connectionLimit: 10,
+  acquireTimeout: 60000,
+  timeout: 60000,
+  reconnect: true,
+});
 
-try {
-  DB_connection = await mysql.createConnection({
-    host: process.env.DB_HOST,
-    user: process.env.DB_USER,
-    password: process.env.DB_PASSWORD,
-    database: process.env.DB_NAME,
-  });
+console.log("✅ MySQL connection pool created!");
 
-  console.log("✅ Connected to MySQL database!");
-} catch (error) {
-  console.error("❌ Failed to connect to MySQL database:", error.message);
-  throw error;
-}
+export { DB_POOL };
 
-export default DB_connection;
+export default DB_POOL;

@@ -61,25 +61,18 @@ class SearchCache {
 const cache = new SearchCache();
 
 export const initYTMusic = async () => {
-  if (isInitialized) return;
+  if (isInitialized) return true;
 
-  if (initializationPromise) {
-    return initializationPromise;
+  try {
+    await ytmusic.initialize();
+    isInitialized = true;
+    console.log("✅ YTMusic API initialized successfully");
+    return true;
+  } catch (error) {
+    console.error("❌ Failed to initialize YTMusic:", error.message);
+    isInitialized = false;
+    throw new Error(`YTMusic initialization failed: ${error.message}`);
   }
-
-  initializationPromise = (async () => {
-    try {
-      await ytmusic.initialize();
-      isInitialized = true;
-      console.log("✅ YTMusic API initialized successfully");
-    } catch (error) {
-      console.error("❌ Failed to initialize YTMusic:", error.message);
-      initializationPromise = null;
-      throw error;
-    }
-  })();
-
-  return initializationPromise;
 };
 
 /**

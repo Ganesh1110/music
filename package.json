@@ -5,7 +5,12 @@
   "scripts": {
     "start": "node src/server.js",
     "dev": "nodemon src/server.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "docker:build": "docker build -t music-api .",
+    "docker:run": "docker run -p 3000:3000 music-api"
   },
   "type": "module",
   "keywords": [],
@@ -15,11 +20,20 @@
   "dependencies": {
     "@distube/ytdl-core": "^4.16.12",
     "axios": "^1.11.0",
+    "compression": "^1.8.1",
     "cors": "^2.8.5",
     "dotenv": "^17.2.1",
     "express": "^5.1.0",
+    "express-rate-limit": "^8.1.0",
     "genius-lyrics": "^4.4.7",
+    "helmet": "^8.1.0",
+    "joi": "^18.0.1",
+    "jsonwebtoken": "^9.0.2",
     "mysql2": "^3.14.3",
+    "node-cache": "^5.1.2",
+    "swagger-jsdoc": "^6.2.8",
+    "swagger-ui-express": "^5.0.1",
+    "winston": "^3.18.3",
     "ytmusic-api": "^5.3.0"
   },
   "devDependencies": {
