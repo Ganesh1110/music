@@ -2,6 +2,7 @@ import express from "express";
 import ytmusicRoutes from "./ytmusicRoutes.js";
 import getSong from "./getSongRoute.js";
 import searchRoutes from "./searchRoutes.js";
+import enhancedSearchRoutes from "./enhancedSearchRoutes.js";
 import docsRoutes from "./docs.js";
 
 const router = express.Router();
@@ -19,6 +20,8 @@ router.get("/users", async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 });
+
+router.use("/enhanced-search", enhancedSearchRoutes);
 
 router.use("/ytmusic", ytmusicRoutes);
 router.use("/song", getSong);
