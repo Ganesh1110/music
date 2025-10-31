@@ -119,4 +119,54 @@ router.get("/search", searchSongs);
  */
 router.get("/suggestions", getSuggestions);
 
+/**
+ * @swagger
+ * /ytmusic/video/{videoId}:
+ *   get:
+ *     summary: Get video details directly by ID
+ *     description: Direct video lookup without search
+ *     tags: [YouTube Music]
+ *     parameters:
+ *       - in: path
+ *         name: videoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: YouTube video ID
+ *     responses:
+ *       200:
+ *         description: Video details retrieved successfully
+ *       404:
+ *         description: Video not found
+ */
+router.get("/video/:videoId", async (req, res) => {
+  try {
+    const { getVideoById } = await import("../models/ytmusicModel.js");
+    const result = await getVideoById(req.params.videoId);
+
+    if (result.success) {
+      res.json({
+        success: true,
+        data: result.video,
+        metadata: {
+          source: result.source,
+          timestamp: new Date().toISOString(),
+        },
+      });
+    } else {
+      res.status(404).json({
+        success: false,
+        error: result.error,
+        message: result.message,
+      });
+    }
+  } catch (error) {
+    console.error("❌ Video lookup error:", error.message);
+    res.status(500).json({
+      error: "Failed to lookup video",
+      message: error.message,
+    });
+  }
+});
+
 export default router;

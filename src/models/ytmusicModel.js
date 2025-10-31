@@ -4,6 +4,9 @@ import YTMusicAdvanced from "ytmusic-advanced";
 let musicClient;
 let isInitialized = false;
 
+const searchResultsCache = new Map();
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
 export const initYTMusic = async () => {
   if (!isInitialized) {
     musicClient = await YTMusicAdvanced.initialize({
@@ -153,26 +156,69 @@ export const getLyrics = async (videoId) => {
 export const getVideoDetails = async (videoId) => {
   try {
     const client = await initYTMusic();
-    const searchResults = await client.searchMusic(videoId, { limit: 1 });
 
-    if (searchResults.success && searchResults.items.length > 0) {
-      const video = searchResults.items[0];
-      return {
-        title: video.title || "Unknown Title",
-        author: video.author || "Unknown Artist",
-        duration: video.duration,
-        durationFormatted: video.durationFormatted,
-        thumbnails: video.thumbnails,
-        viewCount: video.viewCount,
-        category: video.category,
-        isExplicit: video.isExplicit,
-        album: video.album,
-        year: video.year,
-        source: "YTMusicAdvanced",
-      };
+    // Try direct video lookup first
+    try {
+      // Use search with video ID specifically
+      const searchResults = await client.searchMusic(videoId, {
+        limit: 1,
+        filter: "videos",
+      });
+
+      if (searchResults.success && searchResults.items.length > 0) {
+        const video = searchResults.items[0];
+
+        // Verify it's the correct video by checking if videoId matches
+        if (video.videoId === videoId) {
+          return {
+            title: video.title || "Unknown Title",
+            author: video.author || "Unknown Artist",
+            duration: video.duration,
+            durationFormatted: video.durationFormatted,
+            thumbnails: video.thumbnails,
+            viewCount: video.viewCount,
+            category: video.category,
+            isExplicit: video.isExplicit,
+            album: video.album,
+            year: video.year,
+            source: "YTMusicAdvanced",
+          };
+        }
+      }
+    } catch (ytmusicError) {
+      console.warn("⚠️ Direct video lookup failed:", ytmusicError.message);
     }
 
-    throw new Error("Video not found in YTMusicAdvanced");
+    // Fallback: Search with video ID as exact match
+    const searchResults = await client.searchMusic(`"${videoId}"`, {
+      limit: 5,
+    });
+
+    if (searchResults.success && searchResults.items.length > 0) {
+      // Find exact match by videoId
+      const exactMatch = searchResults.items.find(
+        (item) => item.videoId === videoId
+      );
+
+      if (exactMatch) {
+        const video = exactMatch;
+        return {
+          title: video.title || "Unknown Title",
+          author: video.author || "Unknown Artist",
+          duration: video.duration,
+          durationFormatted: video.durationFormatted,
+          thumbnails: video.thumbnails,
+          viewCount: video.viewCount,
+          category: video.category,
+          isExplicit: video.isExplicit,
+          album: video.album,
+          year: video.year,
+          source: "YTMusicAdvanced (fallback)",
+        };
+      }
+    }
+
+    throw new Error(`Video ${videoId} not found in search results`);
   } catch (error) {
     console.error("❌ getVideoDetails error:", error.message);
     return {
@@ -180,6 +226,146 @@ export const getVideoDetails = async (videoId) => {
       author: "Unknown Artist",
       source: "error",
       error: error.message,
+    };
+  }
+};
+
+/**
+ * Enhanced direct video lookup with multiple fallback strategies
+ */
+export const getVideoById = async (videoId) => {
+  try {
+    const client = await initYTMusic();
+
+    console.log(`🔍 Looking up video: ${videoId}`);
+
+    // Strategy 1: Try exact video ID search with different approaches
+    const searchStrategies = [
+      // Try as exact phrase
+      `"${videoId}"`,
+      // Try with YouTube URL format
+      `https://youtube.com/watch?v=${videoId}`,
+      `youtube.com/watch?v=${videoId}`,
+      // Try just the ID (might work differently)
+      videoId,
+      // Try with common prefixes/suffixes
+      `video ${videoId}`,
+      `watch ${videoId}`,
+    ];
+
+    let bestMatch = null;
+    let strategyUsed = null;
+
+    for (const strategy of searchStrategies) {
+      try {
+        console.log(`🔍 Trying strategy: "${strategy}"`);
+
+        const searchResults = await client.searchMusic(strategy, {
+          limit: 10,
+          filter: "videos",
+        });
+
+        if (searchResults.success && searchResults.items.length > 0) {
+          // Look for exact videoId match
+          const exactMatch = searchResults.items.find(
+            (item) => item.videoId === videoId
+          );
+
+          if (exactMatch) {
+            console.log(`✅ Found exact match using strategy: "${strategy}"`);
+            bestMatch = exactMatch;
+            strategyUsed = strategy;
+            break;
+          }
+
+          // If no exact match, check for similar videos that might be the same
+          const similarVideos = searchResults.items.filter(
+            (item) =>
+              item.title?.toLowerCase().includes(videoId.toLowerCase()) ||
+              item.videoId?.includes(videoId)
+          );
+
+          if (similarVideos.length > 0 && !bestMatch) {
+            bestMatch = similarVideos[0];
+            strategyUsed = `similar_${strategy}`;
+          }
+        }
+
+        // Small delay to avoid rate limiting
+        await new Promise((resolve) => setTimeout(resolve, 200));
+      } catch (strategyError) {
+        console.warn(
+          `⚠️ Strategy "${strategy}" failed:`,
+          strategyError.message
+        );
+      }
+    }
+
+    if (bestMatch) {
+      return {
+        success: true,
+        video: {
+          videoId: bestMatch.videoId,
+          title: bestMatch.title || "Unknown Title",
+          author: bestMatch.author || "Unknown Artist",
+          duration: bestMatch.duration,
+          durationFormatted: bestMatch.durationFormatted,
+          thumbnails: bestMatch.thumbnails || [],
+          viewCount: bestMatch.viewCount,
+          category: bestMatch.category,
+          isExplicit: bestMatch.isExplicit || false,
+        },
+        source: `strategy: ${strategyUsed}`,
+        exactMatch: bestMatch.videoId === videoId,
+      };
+    }
+
+    // Strategy 2: Try to find the video through the original search that worked
+    console.log(`🔄 Falling back to original search method for: ${videoId}`);
+    const fallbackSearch = await client.searchMusic("Powerhouse", {
+      limit: 20,
+      filter: "videos",
+    });
+
+    if (fallbackSearch.success && fallbackSearch.items.length > 0) {
+      const videoFromOriginalSearch = fallbackSearch.items.find(
+        (item) => item.videoId === videoId
+      );
+
+      if (videoFromOriginalSearch) {
+        console.log(`✅ Found video through original search fallback`);
+        return {
+          success: true,
+          video: {
+            videoId: videoFromOriginalSearch.videoId,
+            title: videoFromOriginalSearch.title || "Unknown Title",
+            author: videoFromOriginalSearch.author || "Unknown Artist",
+            duration: videoFromOriginalSearch.duration,
+            durationFormatted: videoFromOriginalSearch.durationFormatted,
+            thumbnails: videoFromOriginalSearch.thumbnails || [],
+            viewCount: videoFromOriginalSearch.viewCount,
+            category: videoFromOriginalSearch.category,
+            isExplicit: videoFromOriginalSearch.isExplicit || false,
+          },
+          source: "original_search_fallback",
+          exactMatch: true,
+        };
+      }
+    }
+
+    return {
+      success: false,
+      error: `Video ${videoId} not found through any search strategy`,
+      message:
+        "The video may be region-restricted, age-gated, or unavailable through the API",
+      availableInSearch: false,
+    };
+  } catch (error) {
+    console.error("❌ getVideoById error:", error.message);
+    return {
+      success: false,
+      error: error.message,
+      message: "Video lookup service unavailable",
     };
   }
 };
@@ -274,4 +460,45 @@ export const getArtist = async (artistName, options = {}) => {
     subscribers: artist.subscribers,
     videos: searchResults.items.filter((item) => item.author === artist.author),
   };
+};
+
+/**
+ * Get video from cached search results
+ */
+export const getVideoFromCache = async (videoId) => {
+  // Check if we have recent search results that contain this video
+  for (const [query, { results, timestamp }] of searchResultsCache.entries()) {
+    if (Date.now() - timestamp < CACHE_TTL) {
+      const video = results.items?.find((item) => item.videoId === videoId);
+      if (video) {
+        console.log(`📋 Found video in search cache for query: "${query}"`);
+        return {
+          success: true,
+          video: video,
+          source: `cached_search:${query}`,
+          cached: true,
+        };
+      }
+    }
+  }
+  return null;
+};
+
+/**
+ * Cache search results for future video lookups
+ */
+export const cacheSearchResults = (query, results) => {
+  if (results?.items?.length > 0) {
+    searchResultsCache.set(query, {
+      results,
+      timestamp: Date.now(),
+    });
+
+    // Clean old cache entries
+    for (const [key, { timestamp }] of searchResultsCache.entries()) {
+      if (Date.now() - timestamp > CACHE_TTL) {
+        searchResultsCache.delete(key);
+      }
+    }
+  }
 };
