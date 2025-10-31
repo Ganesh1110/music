@@ -1,8 +1,8 @@
-import YTMusic from "ytmusic-api";
+import YTMusicAdvanced from "ytmusic-advanced";
 
-const ytmusic = new YTMusic();
+// Initialize YTMusicAdvanced client
+let musicClient;
 let isInitialized = false;
-let initializationPromise = null;
 
 // Enhanced cache with TTL and size limits
 class SearchCache {
@@ -61,22 +61,26 @@ class SearchCache {
 const cache = new SearchCache();
 
 export const initYTMusic = async () => {
-  if (isInitialized) return true;
+  if (isInitialized) return musicClient;
 
   try {
-    await ytmusic.initialize();
+    musicClient = await YTMusicAdvanced.initialize({
+      cacheEnabled: true,
+      language: "en",
+      country: "US",
+    });
     isInitialized = true;
-    console.log("✅ YTMusic API initialized successfully");
-    return true;
+    console.log("✅ YTMusicAdvanced initialized successfully");
+    return musicClient;
   } catch (error) {
-    console.error("❌ Failed to initialize YTMusic:", error.message);
+    console.error("❌ Failed to initialize YTMusicAdvanced:", error.message);
     isInitialized = false;
-    throw new Error(`YTMusic initialization failed: ${error.message}`);
+    throw new Error(`YTMusicAdvanced initialization failed: ${error.message}`);
   }
 };
 
 /**
- * Enhanced search with multiple search strategies
+ * Enhanced search with YTMusicAdvanced
  */
 export const searchSongs = async (query) => {
   if (!query || typeof query !== "string" || !query.trim()) {
@@ -92,7 +96,7 @@ export const searchSongs = async (query) => {
     return cachedResult;
   }
 
-  await initYTMusic();
+  const client = await initYTMusic();
 
   const result = {
     songs: [],
@@ -106,7 +110,7 @@ export const searchSongs = async (query) => {
 
   // Helper function to determine if a video is likely a compilation
   const isCompilation = (item) => {
-    const title = (item.title || item.name || "").toLowerCase();
+    const title = (item.title || "").toLowerCase();
     const duration = item.duration || 0;
 
     // Check for compilation indicators
@@ -134,8 +138,8 @@ export const searchSongs = async (query) => {
 
   // Helper function to calculate relevance score
   const calculateRelevanceScore = (item, searchQuery) => {
-    const title = (item.title || item.name || "").toLowerCase();
-    const artist = (item.artist?.name || item.author || "").toLowerCase();
+    const title = (item.title || "").toLowerCase();
+    const artist = (item.author || "").toLowerCase();
     const query = searchQuery.toLowerCase();
 
     let score = 0;
@@ -156,8 +160,8 @@ export const searchSongs = async (query) => {
     // Penalty for compilations
     if (isCompilation(item)) score -= 30;
 
-    // Bonus for having view/play counts (indicates popularity)
-    if (item.viewCount || item.playCount) score += 20;
+    // Bonus for having view counts (indicates popularity)
+    if (item.viewCount) score += 20;
 
     // Duration bonus for normal song length (2-6 minutes)
     const duration = item.duration || 0;
@@ -166,142 +170,100 @@ export const searchSongs = async (query) => {
     return Math.max(0, score);
   };
 
-  const processItems = (items, searchType = "all") => {
+  const processItems = (items) => {
     if (!Array.isArray(items)) {
       console.warn("⚠️ Invalid items array received");
       return;
     }
 
-    const processedItems = [];
-
     for (const item of items) {
       try {
-        const type = (item.resultType || item.type || "").toLowerCase();
-        const thumbnail = item.thumbnails?.at(-1)?.url || null;
+        const category = item.category || item.type || "";
         const relevanceScore = calculateRelevanceScore(item, normalizedQuery);
 
         // Enhanced searchable fields
-        const searchableFields = [
-          item.title,
-          item.name,
-          item.artist?.name,
-          item.author,
-          ...(Array.isArray(item.artists)
-            ? item.artists.map((a) => a?.name).filter(Boolean)
-            : []),
-        ].filter(Boolean);
+        const searchableFields = [item.title, item.author, item.album].filter(
+          Boolean
+        );
 
         const isQueryMatched = searchableFields.some((field) =>
           field.toLowerCase().includes(normalizedQuery.toLowerCase())
         );
 
-        const processedItem = {
-          ...item,
-          relevanceScore,
-          isCompilation: isCompilation(item),
-        };
-        processedItems.push(processedItem);
-
-        switch (type) {
+        switch (category) {
           case "song":
-            result.songs.push({
-              type: "song",
-              title: item.title || item.name || "Unknown Title",
-              artists: Array.isArray(item.artists)
-                ? item.artists
-                    .map((a) => a?.name)
-                    .filter(Boolean)
-                    .join(", ")
-                : item.artist?.name || "Unknown Artist",
-              videoId: item.videoId,
-              audioUrl: item.videoId
-                ? `https://www.youtube.com/watch?v=${item.videoId}`
-                : null,
-              duration: item.duration || null,
-              thumbnail,
-              isExplicit: item.isExplicit || false,
-              relevanceScore,
-              playCount: item.playCount || null,
-            });
+          case "video":
+            // Handle both songs and videos
+            const isSong =
+              category === "song" ||
+              (item.duration && !isCompilation(item) && isQueryMatched);
+
+            if (isSong) {
+              result.songs.push({
+                type: "song",
+                title: item.title || "Unknown Title",
+                artists: item.author || "Unknown Artist",
+                videoId: item.videoId,
+                audioUrl: item.videoId
+                  ? `https://www.youtube.com/watch?v=${item.videoId}`
+                  : null,
+                duration: item.duration || null,
+                durationFormatted: item.durationFormatted,
+                thumbnail: item.thumbnails?.[0]?.url,
+                isExplicit: item.isExplicit || false,
+                relevanceScore,
+                viewCount: item.viewCount || null,
+                album: item.album,
+                year: item.year,
+              });
+            } else {
+              // Add as video
+              result.videos.push({
+                type: "video",
+                title: item.title || "Unknown Video",
+                author: item.author || "Unknown Author",
+                duration: item.duration || null,
+                durationFormatted: item.durationFormatted,
+                videoId: item.videoId,
+                url: item.videoId
+                  ? `https://www.youtube.com/watch?v=${item.videoId}`
+                  : null,
+                thumbnail: item.thumbnails?.[0]?.url,
+                viewCount: item.viewCount || null,
+                relevanceScore,
+                isCompilation: isCompilation(item),
+              });
+            }
             break;
 
           case "album":
             result.albums.push({
               type: "album",
-              title: item.title || item.name || "Unknown Album",
-              artist: item.artist?.name || "Unknown Artist",
+              title: item.title || "Unknown Album",
+              artist: item.author || "Unknown Artist",
               year: item.year || null,
-              albumId: item.albumId || null,
-              browseId: item.browseId || item.playlistId || null,
-              url:
-                item.browseId || item.playlistId
-                  ? `https://music.youtube.com/browse/${
-                      item.browseId || item.playlistId
-                    }`
-                  : null,
-              thumbnail,
+              albumId: item.albumId || item.videoId,
+              browseId: item.browseId || null,
+              url: item.albumId
+                ? `https://music.youtube.com/browse/${item.albumId}`
+                : null,
+              thumbnail: item.thumbnails?.[0]?.url,
               trackCount: item.trackCount || null,
               relevanceScore,
             });
             break;
 
-          case "video":
-            // Only add videos that aren't compilations or add them separately
-            const videoData = {
-              type: "video",
-              title: item.title || item.name || "Unknown Video",
-              author: item.author || item.artist?.name || "Unknown Author",
-              duration: item.duration || null,
-              videoId: item.videoId,
-              url: item.videoId
-                ? `https://www.youtube.com/watch?v=${item.videoId}`
-                : null,
-              thumbnail,
-              viewCount: item.viewCount || null,
-              relevanceScore,
-              isCompilation: isCompilation(item),
-            };
-
-            result.videos.push(videoData);
-
-            // Add as song if it's not a compilation and matches query
-            if (
-              item.videoId &&
-              item.duration &&
-              isQueryMatched &&
-              !isCompilation(item)
-            ) {
-              result.songs.push({
-                type: "song",
-                title: item.title || item.name || "Unknown Title",
-                artists: Array.isArray(item.artists)
-                  ? item.artists
-                      .map((a) => a?.name)
-                      .filter(Boolean)
-                      .join(", ")
-                  : item.artist?.name || item.author || "Unknown Artist",
-                videoId: item.videoId,
-                audioUrl: `https://www.youtube.com/watch?v=${item.videoId}`,
-                duration: item.duration,
-                thumbnail,
-                isExplicit: false,
-                source: "video",
-                relevanceScore,
-              });
-            }
-            break;
-
           case "playlist":
             result.communityPlaylists.push({
               type: "playlist",
-              title: item.title || item.name || "Unknown Playlist",
-              author: item.artist?.name || item.author || "Unknown Author",
-              playlistId: item.playlistId,
+              title: item.title || "Unknown Playlist",
+              author: item.author || "Unknown Author",
+              playlistId: item.playlistId || item.videoId,
               count: item.itemCount || item.trackCount || null,
               url: item.playlistId
                 ? `https://music.youtube.com/playlist?list=${item.playlistId}`
                 : null,
-              thumbnail,
+              thumbnail: item.thumbnails?.[0]?.url,
               description: item.description || null,
               relevanceScore,
             });
@@ -310,16 +272,13 @@ export const searchSongs = async (query) => {
           case "artist":
             result.artists.push({
               type: "artist",
-              name: item.name || "Unknown Artist",
-              browseId: item.browseId || item.artistId || null,
+              name: item.author || item.title || "Unknown Artist",
+              browseId: item.browseId || item.videoId,
               subscribers: item.subscriberCount || null,
-              url:
-                item.browseId || item.artistId
-                  ? `https://music.youtube.com/channel/${
-                      item.browseId || item.artistId
-                    }`
-                  : null,
-              thumbnail,
+              url: item.browseId
+                ? `https://music.youtube.com/channel/${item.browseId}`
+                : null,
+              thumbnail: item.thumbnails?.[0]?.url,
               verified: item.verified || false,
               relevanceScore,
             });
@@ -335,20 +294,17 @@ export const searchSongs = async (query) => {
             ) {
               result.songs.push({
                 type: "song",
-                title: item.title || item.name || "Unknown Title",
-                artists: Array.isArray(item.artists)
-                  ? item.artists
-                      .map((a) => a?.name)
-                      .filter(Boolean)
-                      .join(", ")
-                  : item.artist?.name || item.author || "Unknown Artist",
+                title: item.title || "Unknown Title",
+                artists: item.author || "Unknown Artist",
                 videoId: item.videoId,
                 audioUrl: `https://www.youtube.com/watch?v=${item.videoId}`,
                 duration: item.duration,
-                thumbnail,
+                durationFormatted: item.durationFormatted,
+                thumbnail: item.thumbnails?.[0]?.url,
                 isExplicit: false,
                 source: "unknown",
                 relevanceScore,
+                viewCount: item.viewCount,
               });
             }
             break;
@@ -357,16 +313,14 @@ export const searchSongs = async (query) => {
         console.error("⚠️ Error processing item:", itemError.message, item);
       }
     }
-
-    return processedItems;
   };
 
-  // Multi-strategy search approach
+  // Multi-strategy search approach with YTMusicAdvanced
   const multiStrategySearch = async () => {
     const searchStrategies = [
-      { type: "song", weight: 1.0 },
-      { type: "all", weight: 0.8 },
-      { type: "video", weight: 0.6 },
+      { type: "music", method: client.searchMusic, weight: 1.0 },
+      { type: "all", method: client.searchAll, weight: 0.8 },
+      { type: "quick", method: client.quickSearch, weight: 0.6 },
     ];
 
     let allItems = [];
@@ -378,24 +332,35 @@ export const searchSongs = async (query) => {
           `🔍 Trying search strategy: ${strategy.type} for "${normalizedQuery}"`
         );
 
-        const items = await ytmusic.search(normalizedQuery, strategy.type);
+        const searchResults = await strategy.method.call(
+          client,
+          normalizedQuery,
+          {
+            limit: 20,
+          }
+        );
 
-        if (Array.isArray(items) && items.length > 0) {
-          const processedItems = processItems(items, strategy.type);
+        if (
+          searchResults.success &&
+          Array.isArray(searchResults.items) &&
+          searchResults.items.length > 0
+        ) {
+          const items = searchResults.items;
 
           // Apply strategy weight to relevance scores
-          processedItems.forEach((item) => {
+          items.forEach((item) => {
             if (item.relevanceScore) {
               item.relevanceScore *= strategy.weight;
             }
           });
 
-          allItems.push(...processedItems);
+          allItems.push(...items);
 
           // Check if this strategy gave us good song results
           const songCount = items.filter(
             (item) =>
-              (item.resultType || item.type || "").toLowerCase() === "song" ||
+              item.category === "song" ||
+              item.type === "song" ||
               (item.videoId && item.duration && !isCompilation(item))
           ).length;
 
@@ -420,8 +385,17 @@ export const searchSongs = async (query) => {
   try {
     const items = await multiStrategySearch();
 
-    if (Array.isArray(items)) {
+    if (Array.isArray(items) && items.length > 0) {
       processItems(items);
+    } else {
+      // Fallback to basic search if multi-strategy fails
+      console.log(`🔄 Falling back to basic search for "${normalizedQuery}"`);
+      const basicResults = await client.searchMusic(normalizedQuery, {
+        limit: 20,
+      });
+      if (basicResults.success && Array.isArray(basicResults.items)) {
+        processItems(basicResults.items);
+      }
     }
 
     // Sort results by relevance score
@@ -478,7 +452,7 @@ export const searchSongs = async (query) => {
     const errorResult = {
       ...result,
       error: true,
-      errorMessage: error.message || "YTMusic search failed",
+      errorMessage: error.message || "YTMusicAdvanced search failed",
       totalResults: 0,
     };
 
@@ -497,4 +471,28 @@ export const getCacheStats = () => {
     maxSize: cache.maxSize,
     defaultTTL: cache.defaultTTL,
   };
+};
+
+/**
+ * Additional enhanced methods with YTMusicAdvanced
+ */
+export const advancedSearch = async (query, filters = {}) => {
+  const client = await initYTMusic();
+  const searchResults = await client.advancedSearch(query, filters);
+
+  if (!searchResults.success) {
+    throw new Error(searchResults.error || "Advanced search failed");
+  }
+
+  return searchResults;
+};
+
+export const getSearchSuggestions = async (query, limit = 10) => {
+  const client = await initYTMusic();
+  return await client.getSuggestions(query, limit);
+};
+
+export const getClientStatus = async () => {
+  const client = await initYTMusic();
+  return client.getStatus();
 };

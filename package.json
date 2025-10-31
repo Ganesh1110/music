@@ -34,6 +34,7 @@
     "swagger-jsdoc": "^6.2.8",
     "swagger-ui-express": "^5.0.1",
     "winston": "^3.18.3",
+    "ytmusic-advanced": "file:../ytmusic-advanced/ytmusic-advanced-1.0.0.tgz",
     "ytmusic-api": "^5.3.0"
   },
   "devDependencies": {

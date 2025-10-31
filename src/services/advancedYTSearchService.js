@@ -1,8 +1,8 @@
-import YTMusic from "ytmusic-api";
+import YTMusicAdvanced from "ytmusic-advanced";
 
 class AdvancedYTSearchService {
   constructor() {
-    this.ytmusic = new YTMusic();
+    this.musicClient = null;
     this.initialized = false;
     this.searchCache = new Map();
     this.CACHE_TTL = 10 * 60 * 1000; // 10 minutes
@@ -10,17 +10,24 @@ class AdvancedYTSearchService {
 
   async initialize() {
     if (!this.initialized) {
-      await this.ytmusic.initialize();
+      this.musicClient = await YTMusicAdvanced.initialize({
+        cacheEnabled: true,
+        language: "en",
+        country: "US",
+      });
       this.initialized = true;
-      console.log("✅ Advanced YTMusic Search initialized");
+      console.log(
+        "✅ Advanced YTMusic Search initialized with YTMusicAdvanced"
+      );
     }
+    return this.musicClient;
   }
 
   /**
-   * Main enhanced search method
+   * Main enhanced search method using YTMusicAdvanced
    */
   async advancedSearch(query, options = {}) {
-    await this.initialize();
+    const client = await this.initialize();
 
     const {
       limit = 25,
@@ -48,21 +55,22 @@ class AdvancedYTSearchService {
 
       switch (strategy) {
         case "fast":
-          results = await this.fastSearch(query, types, limit);
+          results = await this.fastSearch(client, query, types, limit);
           break;
         case "comprehensive":
-          results = await this.comprehensiveSearch(query, types, limit);
+          results = await this.comprehensiveSearch(client, query, types, limit);
           break;
         case "accurate":
-          results = await this.accurateSearch(query, types, limit);
+          results = await this.accurateSearch(client, query, types, limit);
           break;
         default:
-          results = await this.comprehensiveSearch(query, types, limit);
+          results = await this.comprehensiveSearch(client, query, types, limit);
       }
 
       // Apply filters
       if (filterExplicit) {
         results.songs = results.songs.filter((song) => !song.isExplicit);
+        results.videos = results.videos.filter((video) => !video.isExplicit);
       }
 
       if (minDuration || maxDuration) {
@@ -90,7 +98,11 @@ class AdvancedYTSearchService {
 
       // Generate suggestions if requested
       if (includeSuggestions) {
-        results.suggestions = this.generateSmartSuggestions(query, results);
+        results.suggestions = await this.generateSmartSuggestions(
+          client,
+          query,
+          results
+        );
       }
 
       // Cache the results
@@ -108,47 +120,66 @@ class AdvancedYTSearchService {
   }
 
   /**
-   * Fast search - single query, quick results
+   * Fast search using YTMusicAdvanced methods
    */
-  async fastSearch(query, types, limit) {
-    const results = {};
+  async fastSearch(client, query, types, limit) {
+    const results = {
+      songs: [],
+      videos: [],
+      albums: [],
+      artists: [],
+      playlists: [],
+    };
 
-    // Execute all type searches in parallel
-    const searchPromises = types.map((type) =>
-      this.ytmusic
-        .search(query, type)
-        .then((data) => ({ type, data: data || [] }))
-        .catch((error) => ({ type, data: [], error: error.message }))
-    );
+    try {
+      // Use appropriate YTMusicAdvanced search method based on types
+      let searchResults;
 
-    const settledResults = await Promise.allSettled(searchPromises);
-
-    settledResults.forEach((result) => {
-      if (result.status === "fulfilled") {
-        const { type, data } = result.value;
-        results[type] = this.processTypeResults(data, type, query).slice(
-          0,
-          limit
-        );
+      if (
+        types.includes("songs") ||
+        (types.length === 1 && types[0] === "songs")
+      ) {
+        searchResults = await client.searchMusic(query, { limit: limit * 2 });
+      } else if (types.includes("all") || types.length > 2) {
+        searchResults = await client.searchAll(query, { limit: limit * 2 });
+      } else {
+        searchResults = await client.searchMusic(query, { limit: limit * 2 });
       }
-    });
+
+      if (searchResults.success && Array.isArray(searchResults.items)) {
+        const processedItems = this.processYTMusicResults(
+          searchResults.items,
+          query
+        );
+
+        // Categorize results
+        processedItems.forEach((item) => {
+          const category = this.mapCategory(item.category || item.type);
+          if (types.includes(category)) {
+            results[category].push(item);
+          }
+        });
+      }
+    } catch (error) {
+      console.warn(`⚠️ Fast search failed:`, error.message);
+    }
 
     return this.enhanceResults(results, query);
   }
 
   /**
-   * Comprehensive search - multiple strategies combined
+   * Comprehensive search with multiple strategies
    */
-  async comprehensiveSearch(query, types, limit) {
+  async comprehensiveSearch(client, query, types, limit) {
     const strategies = [
       // Primary search
-      this.fastSearch(query, types, limit * 2),
+      this.fastSearch(client, query, types, limit * 2),
 
       // Query variations
-      this.queryVariationSearch(query, types, Math.floor(limit / 2)),
+      this.queryVariationSearch(client, query, types, Math.floor(limit / 2)),
 
-      // Fallback to video search for missing songs
-      this.videoFallbackSearch(query, types, Math.floor(limit / 3)),
+      // Quick search for additional results
+      this.quickSearchFallback(client, query, types, Math.floor(limit / 3)),
     ];
 
     const results = await Promise.allSettled(strategies);
@@ -158,27 +189,28 @@ class AdvancedYTSearchService {
   }
 
   /**
-   * Accurate search - prioritizes exact matches and quality
+   * Accurate search with advanced scoring
    */
-  async accurateSearch(query, types, limit) {
-    const [primaryResults, variationResults] = await Promise.all([
-      this.fastSearch(query, types, limit * 3),
-      this.queryVariationSearch(query, types, limit * 2),
+  async accurateSearch(client, query, types, limit) {
+    const [primaryResults, quickResults] = await Promise.all([
+      this.fastSearch(client, query, types, limit * 3),
+      this.quickSearchFallback(client, query, types, limit * 2),
     ]);
 
-    const merged = this.mergeResults([primaryResults, variationResults]);
+    const merged = this.mergeResults([primaryResults, quickResults]);
     const scoredResults = this.applyAdvancedScoring(merged, query);
 
     return this.filterHighQualityResults(scoredResults, limit);
   }
 
   /**
-   * Search with query variations
+   * Search with query variations using YTMusicAdvanced
    */
-  async queryVariationSearch(query, types, limit) {
+  async queryVariationSearch(client, query, types, limit) {
     const variations = this.generateQueryVariations(query);
     const variationPromises = variations.map((variation) =>
       this.fastSearch(
+        client,
         variation,
         types,
         Math.floor(limit / variations.length)
@@ -196,109 +228,135 @@ class AdvancedYTSearchService {
   }
 
   /**
-   * Fallback to video search when song results are poor
+   * Quick search fallback using YTMusicAdvanced quickSearch
    */
-  async videoFallbackSearch(query, types, limit) {
-    const primaryResults = await this.fastSearch(query, types, limit);
+  async quickSearchFallback(client, query, types, limit) {
+    try {
+      const quickResults = await client.quickSearch(query, {
+        limit: limit * 2,
+      });
 
-    // If we have few songs but could have videos, try video conversion
-    if (primaryResults.songs.length < 5 && types.includes("videos")) {
-      const videoResults = primaryResults.videos.slice(0, limit * 2);
-      const convertedSongs = this.convertVideosToSongs(videoResults, query);
-      primaryResults.songs.push(...convertedSongs);
+      if (quickResults.success && Array.isArray(quickResults.items)) {
+        const processedItems = this.processYTMusicResults(
+          quickResults.items,
+          query
+        );
+        const results = {
+          songs: [],
+          videos: [],
+          albums: [],
+          artists: [],
+          playlists: [],
+        };
+
+        processedItems.forEach((item) => {
+          const category = this.mapCategory(item.category || item.type);
+          if (types.includes(category)) {
+            results[category].push(item);
+          }
+        });
+
+        return results;
+      }
+    } catch (error) {
+      console.warn(`⚠️ Quick search fallback failed:`, error.message);
     }
 
-    return primaryResults;
+    return {
+      songs: [],
+      videos: [],
+      albums: [],
+      artists: [],
+      playlists: [],
+    };
   }
 
   /**
-   * Generate smart query variations
+   * Process YTMusicAdvanced results to consistent format
    */
-  generateQueryVariations(query) {
-    const variations = new Set();
-    const words = query.toLowerCase().split(/\s+/);
-
-    // Original query
-    variations.add(query);
-
-    // Remove common filler words
-    const fillerWords = new Set([
-      "official",
-      "video",
-      "lyrics",
-      "audio",
-      "music",
-      "song",
-      "hd",
-      "4k",
-    ]);
-    const cleaned = words.filter((word) => !fillerWords.has(word));
-    if (cleaned.length > 0 && cleaned.join(" ") !== query) {
-      variations.add(cleaned.join(" "));
-    }
-
-    // Artist-song format variations
-    if (words.length >= 2) {
-      variations.add(words.slice().reverse().join(" "));
-    }
-
-    // Add "topic" for official audio (YouTube Music specific)
-    variations.add(`${query} topic`);
-
-    // Remove featuring information for broader search
-    const withoutFeat = query
-      .replace(/\s+ft\.?\s+.+/i, "")
-      .replace(/\s+feat\.?\s+.+/i, "")
-      .replace(/\s+featuring\s+.+/i, "");
-    if (withoutFeat !== query) {
-      variations.add(withoutFeat.trim());
-    }
-
-    return Array.from(variations).slice(0, 5); // Limit variations
-  }
-
-  /**
-   * Process and enhance results for each type
-   */
-  processTypeResults(items, type, originalQuery) {
+  processYTMusicResults(items, originalQuery) {
     if (!Array.isArray(items)) return [];
 
     return items.map((item) => {
-      const enhanced = { ...item };
+      const category = this.mapCategory(item.category || item.type);
 
-      // Add relevance scoring
-      enhanced.relevanceScore = this.calculateRelevanceScore(
-        item,
-        originalQuery,
-        type
-      );
+      const processedItem = {
+        ...item,
+        // Standardize field names
+        title: item.title || "Unknown Title",
+        author: item.author || "Unknown Artist",
+        duration: item.duration,
+        durationFormatted: item.durationFormatted,
+        thumbnails: item.thumbnails || [],
+        videoId: item.videoId,
+        viewCount: item.viewCount,
+        isExplicit: item.isExplicit || false,
+        category: category,
+        type: category,
 
-      // Add search metadata
-      enhanced.searchMetadata = {
-        matchedQuery: originalQuery,
-        matchType: this.determineMatchType(item, originalQuery, type),
-        confidence: enhanced.relevanceScore,
+        // Enhanced fields
+        relevanceScore: this.calculateRelevanceScore(
+          item,
+          originalQuery,
+          category
+        ),
+        searchMetadata: {
+          matchedQuery: originalQuery,
+          matchType: this.determineMatchType(item, originalQuery, category),
+          confidence: this.calculateRelevanceScore(
+            item,
+            originalQuery,
+            category
+          ),
+        },
+        isLikelySong: this.isLikelySong(item),
+        qualityScore: this.calculateQualityScore(item),
       };
 
-      // Enhance with additional computed fields
-      if (type === "songs" || type === "videos") {
-        enhanced.isLikelySong = this.isLikelySong(item);
-        enhanced.qualityScore = this.calculateQualityScore(item);
+      // Add type-specific IDs
+      if (category === "album" && !item.albumId) {
+        processedItem.albumId = item.videoId;
+      }
+      if (category === "playlist" && !item.playlistId) {
+        processedItem.playlistId = item.videoId;
+      }
+      if (category === "artist" && !item.artistId) {
+        processedItem.artistId = item.videoId;
       }
 
-      return enhanced;
+      return processedItem;
     });
   }
 
   /**
-   * Advanced relevance scoring
+   * Map YTMusicAdvanced categories to our internal types
+   */
+  mapCategory(category) {
+    const categoryMap = {
+      song: "songs",
+      video: "videos",
+      album: "albums",
+      artist: "artists",
+      playlist: "playlists",
+      songs: "songs",
+      videos: "videos",
+      albums: "albums",
+      artists: "artists",
+      playlists: "playlists",
+    };
+
+    return categoryMap[category] || "videos";
+  }
+
+  /**
+   * Advanced relevance scoring (adapted for YTMusicAdvanced data structure)
    */
   calculateRelevanceScore(item, query, type) {
     const queryTerms = query.toLowerCase().split(/\s+/);
     let score = 0;
 
-    const title = (item.title || item.name || "").toLowerCase();
-    const artist = (item.artist?.name || item.author || "").toLowerCase();
+    const title = (item.title || "").toLowerCase();
+    const artist = (item.author || "").toLowerCase();
 
     // Exact matches (highest priority)
     if (title === query.toLowerCase()) score += 3.0;
@@ -329,9 +387,6 @@ class AdvancedYTSearchService {
     // Penalty for compilation-like titles
     if (this.isCompilation(item)) score -= 0.5;
 
-    // Bonus for verified/channel artists
-    if (item.artist?.verified || item.isVerified) score += 0.2;
-
     return Math.max(0, Math.min(score, 5.0));
   }
 
@@ -339,8 +394,8 @@ class AdvancedYTSearchService {
    * Determine how well the item matches the query
    */
   determineMatchType(item, query, type) {
-    const title = (item.title || item.name || "").toLowerCase();
-    const artist = (item.artist?.name || item.author || "").toLowerCase();
+    const title = (item.title || "").toLowerCase();
+    const artist = (item.author || "").toLowerCase();
     const queryLower = query.toLowerCase();
 
     if (title === queryLower) return "exact_title";
@@ -383,11 +438,10 @@ class AdvancedYTSearchService {
 
     // Popularity indicators
     if (item.viewCount > 1000000) score += 0.1;
-    if (item.playCount > 50000) score += 0.1;
 
-    // Channel/artist credibility
-    if (item.artist?.verified || item.isVerified) score += 0.1;
+    // Quality indicators from YTMusicAdvanced
     if (item.isExplicit) score += 0.05; // Slight bonus for explicit (often official)
+    if (item.thumbnails && item.thumbnails.length > 0) score += 0.05;
 
     return Math.min(score, 1.0);
   }
@@ -431,28 +485,108 @@ class AdvancedYTSearchService {
   }
 
   /**
-   * Convert videos to song format when needed
+   * Generate smart search suggestions using YTMusicAdvanced
    */
-  convertVideosToSongs(videos, originalQuery) {
-    return videos
-      .filter((video) => this.isLikelySong(video))
-      .map((video) => ({
-        ...video,
-        resultType: "song",
-        artist: video.author ? { name: video.author } : null,
-        convertedFromVideo: true,
-        relevanceScore: this.calculateRelevanceScore(
-          video,
-          originalQuery,
-          "songs"
-        ),
-      }))
-      .sort((a, b) => b.relevanceScore - a.relevanceScore);
+  async generateSmartSuggestions(client, query, results) {
+    const suggestions = new Set();
+
+    try {
+      // Get suggestions from YTMusicAdvanced
+      const ytSuggestions = await client.getSuggestions(query, 5);
+      ytSuggestions.forEach((suggestion) => suggestions.add(suggestion));
+    } catch (error) {
+      console.warn(
+        "⚠️ Failed to get YTMusicAdvanced suggestions:",
+        error.message
+      );
+    }
+
+    // Based on artists found
+    results.artists.slice(0, 3).forEach((artist) => {
+      suggestions.add(`${artist.author} songs`);
+      suggestions.add(`${artist.author} popular`);
+    });
+
+    // Based on albums found
+    results.albums.slice(0, 2).forEach((album) => {
+      suggestions.add(album.title);
+      if (album.author) {
+        suggestions.add(`${album.author} ${album.title}`);
+      }
+    });
+
+    // Common variations
+    suggestions.add(`${query} lyrics`);
+    suggestions.add(`${query} official audio`);
+    suggestions.add(`${query} live`);
+    suggestions.add(`${query} acoustic`);
+
+    // Remove the original query
+    suggestions.delete(query);
+
+    return Array.from(suggestions).slice(0, 8);
   }
 
-  /**
-   * Merge results from multiple search strategies
-   */
+  // The following methods remain largely the same as they're utility functions:
+  // - generateQueryVariations
+  // - mergeMultipleResults
+  // - mergeResults
+  // - deduplicateAndRank
+  // - applyAdvancedScoring
+  // - calculateFinalScore
+  // - isHighQuality
+  // - filterHighQualityResults
+  // - enhanceResults
+  // - getFromCache
+  // - setCache
+  // - clearCache
+  // - getCacheStats
+  // - calculateTotal
+
+  // Keeping the existing implementations for these utility methods:
+  generateQueryVariations(query) {
+    const variations = new Set();
+    const words = query.toLowerCase().split(/\s+/);
+
+    // Original query
+    variations.add(query);
+
+    // Remove common filler words
+    const fillerWords = new Set([
+      "official",
+      "video",
+      "lyrics",
+      "audio",
+      "music",
+      "song",
+      "hd",
+      "4k",
+    ]);
+    const cleaned = words.filter((word) => !fillerWords.has(word));
+    if (cleaned.length > 0 && cleaned.join(" ") !== query) {
+      variations.add(cleaned.join(" "));
+    }
+
+    // Artist-song format variations
+    if (words.length >= 2) {
+      variations.add(words.slice().reverse().join(" "));
+    }
+
+    // Add "topic" for official audio (YouTube Music specific)
+    variations.add(`${query} topic`);
+
+    // Remove featuring information for broader search
+    const withoutFeat = query
+      .replace(/\s+ft\.?\s+.+/i, "")
+      .replace(/\s+feat\.?\s+.+/i, "")
+      .replace(/\s+featuring\s+.+/i, "");
+    if (withoutFeat !== query) {
+      variations.add(withoutFeat.trim());
+    }
+
+    return Array.from(variations).slice(0, 5);
+  }
+
   mergeMultipleResults(results, query) {
     const successfulResults = results
       .filter((result) => result.status === "fulfilled")
@@ -481,9 +615,6 @@ class AdvancedYTSearchService {
     return merged;
   }
 
-  /**
-   * Deduplicate and rank results
-   */
   deduplicateAndRank(results, limit) {
     const processed = {};
 
@@ -506,9 +637,6 @@ class AdvancedYTSearchService {
     return processed;
   }
 
-  /**
-   * Apply advanced scoring and filtering
-   */
   applyAdvancedScoring(results, query) {
     const scored = { ...results };
 
@@ -555,9 +683,6 @@ class AdvancedYTSearchService {
     return filtered;
   }
 
-  /**
-   * Enhance results with additional processing
-   */
   enhanceResults(results, query) {
     const enhanced = { ...results };
 
@@ -578,42 +703,6 @@ class AdvancedYTSearchService {
     return enhanced;
   }
 
-  /**
-   * Generate smart search suggestions
-   */
-  generateSmartSuggestions(query, results) {
-    const suggestions = new Set();
-
-    // Based on artists found
-    results.artists.slice(0, 3).forEach((artist) => {
-      suggestions.add(`${artist.name} songs`);
-      suggestions.add(`${artist.name} popular`);
-      suggestions.add(`${artist.name} new`);
-    });
-
-    // Based on albums found
-    results.albums.slice(0, 2).forEach((album) => {
-      suggestions.add(album.title);
-      if (album.artist) {
-        suggestions.add(`${album.artist} ${album.title}`);
-      }
-    });
-
-    // Common variations
-    suggestions.add(`${query} lyrics`);
-    suggestions.add(`${query} official audio`);
-    suggestions.add(`${query} live`);
-    suggestions.add(`${query} acoustic`);
-
-    // Remove the original query
-    suggestions.delete(query);
-
-    return Array.from(suggestions).slice(0, 8);
-  }
-
-  /**
-   * Cache management
-   */
   getFromCache(key) {
     const cached = this.searchCache.get(key);
     if (cached && Date.now() - cached.timestamp < this.CACHE_TTL) {
@@ -624,7 +713,7 @@ class AdvancedYTSearchService {
     }
 
     if (cached) {
-      this.searchCache.delete(key); // Remove expired
+      this.searchCache.delete(key);
     }
 
     return null;
@@ -636,7 +725,6 @@ class AdvancedYTSearchService {
       timestamp: Date.now(),
     });
 
-    // Simple cache cleanup
     if (this.searchCache.size > 500) {
       const firstKey = this.searchCache.keys().next().value;
       this.searchCache.delete(firstKey);
