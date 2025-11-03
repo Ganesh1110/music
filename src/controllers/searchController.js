@@ -1,4 +1,5 @@
 import YTMusicAdvanced from "ytmusic-advanced";
+import ytmusicService from "../services/ytmusicService.js";
 
 // Initialize YTMusicAdvanced client
 let musicClient;
@@ -24,170 +25,85 @@ export const searchMusic = async (req, res) => {
   try {
     const { query, type = "music", limit = 20 } = req.query;
 
-    // Enhanced validation
-    if (!query) {
+    // Validation
+    if (!query?.trim()) {
       return res.status(400).json({
-        error: "Missing required parameter",
-        message: "`query` parameter is required",
-        example: "/search?query=your+search+term",
+        error: "Invalid query",
+        message: "Query parameter is required",
       });
     }
 
-    if (typeof query !== "string") {
-      return res.status(400).json({
-        error: "Invalid parameter type",
-        message: "`query` must be a string",
-      });
-    }
+    const cleanedQuery = query.trim();
+    console.log(`🔍 Search: "${cleanedQuery}" [${type}]`);
 
-    const trimmedQuery = query.trim();
-    if (trimmedQuery.length === 0) {
-      return res.status(400).json({
-        error: "Empty query",
-        message: "`query` parameter cannot be empty or only whitespace",
-      });
-    }
-
-    if (trimmedQuery.length > 200) {
-      return res.status(400).json({
-        error: "Query too long",
-        message: "Query must be 200 characters or less",
-      });
-    }
-
-    // Log search request (for monitoring)
-    console.log(
-      `🔍 Search request: "${trimmedQuery}" (type: ${type}) from ${
-        req.ip || "unknown IP"
-      }`
-    );
-
-    const client = await initializeMusicClient();
     let searchResults;
+    const searchLimit = Math.min(parseInt(limit), 50);
 
-    // Use YTMusicAdvanced for search
+    // Use enhanced YTMusicAdvanced methods
     switch (type) {
       case "quick":
-        searchResults = await client.quickSearch(trimmedQuery, {
-          limit: parseInt(limit),
+        searchResults = await ytmusicService.quickSearch(cleanedQuery, {
+          limit: searchLimit,
         });
         break;
       case "all":
-        searchResults = await client.searchAll(trimmedQuery, {
-          limit: parseInt(limit),
+        searchResults = await ytmusicService.searchMusic(cleanedQuery, {
+          limit: searchLimit,
         });
         break;
       case "music":
       default:
-        searchResults = await client.searchMusic(trimmedQuery, {
-          limit: parseInt(limit),
+        searchResults = await ytmusicService.searchMusic(cleanedQuery, {
+          limit: searchLimit,
         });
         break;
     }
 
     const responseTime = Date.now() - startTime;
 
-    // Check if search returned an error
     if (!searchResults.success) {
       return res.status(503).json({
         error: "Search service unavailable",
-        message:
-          searchResults.error || "Search failed due to external service issues",
-        query: trimmedQuery,
+        message: searchResults.error,
+        query: cleanedQuery,
         responseTime: `${responseTime}ms`,
-        retryAfter: "30 seconds",
-        suggestions: searchResults.suggestions || [],
       });
     }
 
-    // Format results for consistent response structure
-    const formattedResults = {
-      songs: searchResults.items.filter(
-        (item) => item.category === "song" || item.type === "song"
-      ),
-      videos: searchResults.items.filter(
-        (item) => item.category === "video" || item.type === "video"
-      ),
-      albums: searchResults.items.filter(
-        (item) => item.category === "album" || item.type === "album"
-      ),
-      artists: searchResults.items.filter(
-        (item) => item.category === "artist" || item.type === "artist"
-      ),
-      playlists: searchResults.items.filter(
-        (item) => item.category === "playlist" || item.type === "playlist"
-      ),
-    };
-
-    // Enhanced response with metadata
+    // Enhanced response format
     const response = {
       success: true,
-      query: trimmedQuery,
+      query: cleanedQuery,
       type: type,
       data: {
-        items: searchResults.items,
-        ...formattedResults,
-      },
-      metadata: {
-        totalResults: searchResults.totalResults || searchResults.items.length,
-        responseTime: `${responseTime}ms`,
-        timestamp: searchResults.timestamp || new Date().toISOString(),
-        searchType: searchResults.searchType,
-        relevanceScore: searchResults.relevanceScore,
-        categories: {
-          songs: formattedResults.songs.length,
-          albums: formattedResults.albums.length,
-          videos: formattedResults.videos.length,
-          playlists: formattedResults.playlists.length,
-          artists: formattedResults.artists.length,
-          total: searchResults.items.length,
+        items: searchResults.items || [],
+        metadata: {
+          totalResults:
+            searchResults.totalResults || searchResults.items?.length || 0,
+          searchType: searchResults.searchType,
+          relevanceScore: searchResults.relevanceScore,
         },
       },
-      suggestions: searchResults.suggestions || [],
+      metadata: {
+        responseTime: `${responseTime}ms`,
+        timestamp: new Date().toISOString(),
+        searchEngine: "YTMusicAdvanced",
+      },
     };
 
-    // Log successful search
     console.log(
-      `✅ Search completed: "${trimmedQuery}" - ${searchResults.items.length} results in ${responseTime}ms`
+      `✅ Search completed: "${cleanedQuery}" - ${response.data.items.length} results`
     );
-
     res.json(response);
   } catch (error) {
     const responseTime = Date.now() - startTime;
-    console.error("❌ Search controller error:", error.message, error.stack);
+    console.error("❌ Search error:", error.message);
 
-    // Determine appropriate status code
-    let statusCode = 500;
-    let errorMessage = "Internal server error occurred during search";
-
-    if (error.message.includes("Invalid query")) {
-      statusCode = 400;
-      errorMessage = error.message;
-    } else if (
-      error.message.includes("timeout") ||
-      error.message.includes("ETIMEDOUT")
-    ) {
-      statusCode = 504;
-      errorMessage = "Search request timed out";
-    } else if (
-      error.message.includes("network") ||
-      error.message.includes("ECONNRESET") ||
-      error.message.includes("YTMusicAdvanced")
-    ) {
-      statusCode = 503;
-      errorMessage = "Search service temporarily unavailable";
-    }
-
-    res.status(statusCode).json({
+    res.status(500).json({
       error: "Search failed",
-      message: errorMessage,
-      query: req.query.query || null,
+      message: error.message,
+      query: req.query.query,
       responseTime: `${responseTime}ms`,
-      timestamp: new Date().toISOString(),
-      ...(process.env.NODE_ENV === "development" && {
-        details: error.message,
-        stack: error.stack,
-      }),
     });
   }
 };
@@ -288,14 +204,18 @@ export const healthCheck = async (req, res) => {
  */
 export const getSuggestions = async (req, res) => {
   try {
-    const { query } = req.query;
+    const { query, limit = 10 } = req.query;
 
-    if (!query) {
-      return res.status(400).json({ error: "Query is required" });
+    if (!query?.trim()) {
+      return res.status(400).json({
+        error: "Query is required",
+      });
     }
 
-    const client = await initializeMusicClient();
-    const suggestions = await client.getSuggestions(query, 10);
+    const suggestions = await ytmusicService.getSuggestions(
+      query.trim(),
+      parseInt(limit)
+    );
 
     res.json({
       success: true,
@@ -316,53 +236,32 @@ export const getSuggestions = async (req, res) => {
  * Advanced search with filters using YTMusicAdvanced
  */
 export const advancedSearch = async (req, res) => {
-  const startTime = Date.now();
-
   try {
     const { query, filters = {} } = req.body;
 
-    if (!query) {
+    if (!query?.trim()) {
       return res.status(400).json({
-        error: "Missing required parameter",
-        message: "`query` parameter is required in request body",
+        error: "Query is required",
       });
     }
 
-    const client = await initializeMusicClient();
-    const searchResults = await client.advancedSearch(query, filters);
-
-    const responseTime = Date.now() - startTime;
-
-    if (!searchResults.success) {
-      return res.status(503).json({
-        error: "Advanced search failed",
-        message: searchResults.error || "Search service unavailable",
-        query: query,
-        responseTime: `${responseTime}ms`,
-      });
-    }
+    const searchResults = await ytmusicService.advancedSearch(
+      query.trim(),
+      filters
+    );
 
     res.json({
       success: true,
       query: query,
       filters: filters,
       data: searchResults,
-      metadata: {
-        responseTime: `${responseTime}ms`,
-        timestamp: searchResults.timestamp || new Date().toISOString(),
-        totalResults: searchResults.totalResults || searchResults.items.length,
-      },
+      timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    const responseTime = Date.now() - startTime;
     console.error("❌ Advanced search error:", error.message);
-
     res.status(500).json({
       error: "Advanced search failed",
       message: error.message,
-      query: req.body.query || null,
-      responseTime: `${responseTime}ms`,
-      timestamp: new Date().toISOString(),
     });
   }
 };

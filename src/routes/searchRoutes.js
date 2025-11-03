@@ -265,7 +265,26 @@ router.post("/advanced", advancedSearch);
  *       503:
  *         description: Service is unhealthy
  */
-router.get("/health", healthCheck);
+router.get("/health", async (req, res) => {
+  try {
+    const ytmusicService = await import("../services/ytmusicService.js");
+    const health = await ytmusicService.default.healthCheck();
+
+    res.json({
+      status: health.healthy ? "healthy" : "unhealthy",
+      service: "search",
+      ytmusicAdvanced: health,
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(503).json({
+      status: "unhealthy",
+      service: "search",
+      error: error.message,
+      timestamp: new Date().toISOString(),
+    });
+  }
+});
 
 /**
  * @swagger
@@ -291,8 +310,8 @@ router.get("/health", healthCheck);
  */
 router.get("/status", async (req, res) => {
   try {
-    const { getClientStatus } = await import("../models/ytmusicModel.js");
-    const status = await getClientStatus();
+    const ytmusicService = await import("../services/ytmusicService.js");
+    const status = await ytmusicService.default.getStatus();
 
     res.json({
       success: true,
@@ -300,9 +319,8 @@ router.get("/status", async (req, res) => {
       timestamp: new Date().toISOString(),
     });
   } catch (error) {
-    console.error("❌ Status check error:", error.message);
     res.status(500).json({
-      error: "Failed to get client status",
+      error: "Failed to get status",
       message: error.message,
     });
   }
@@ -365,7 +383,23 @@ router.get("/cache/stats", getCacheStatistics);
  *                 timestamp:
  *                   type: string
  */
-router.delete("/cache", clearCache);
+router.delete("/cache", async (req, res) => {
+  try {
+    const ytmusicService = await import("../services/ytmusicService.js");
+    await ytmusicService.default.clearCache();
+
+    res.json({
+      success: true,
+      message: "Search cache cleared",
+      timestamp: new Date().toISOString(),
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: "Failed to clear cache",
+      message: error.message,
+    });
+  }
+});
 
 /**
  * @swagger
