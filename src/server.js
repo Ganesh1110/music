@@ -31,8 +31,56 @@ app.use(express.json());
   }
 })();
 
+const asyncHandler = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch(next);
+};
+
 // Routes
-app.use("/api/search", searchRoutes);
+app.get(
+  "/api/search",
+  asyncHandler(async (req, res) => {
+    const {
+      q: query,
+      limit = 10,
+      preferOfficial = true,
+      minRelevanceScore = 0.5,
+    } = req.query;
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        error: 'Query parameter "q" is required',
+      });
+    }
+
+    console.log(`🔍 Search request: "${query}"`);
+
+    const results = await ytmusicService.searchMusic(query, {
+      limit: parseInt(limit),
+      preferOfficial: preferOfficial === "true",
+      minRelevanceScore: parseFloat(minRelevanceScore),
+    });
+
+    res.json({
+      success: true,
+      query,
+      results: results.items.map((item) => ({
+        id: item.videoId,
+        title: item.title,
+        artist: item.artists?.[0]?.name || "Unknown",
+        album: item.album?.name || null,
+        duration: item.duration,
+        thumbnail: item.thumbnails?.[0]?.url || null,
+        scores: {
+          quality: item.scores?.quality?.toFixed(2),
+          relevance: item.scores?.relevance?.toFixed(2),
+          total: item.totalScore?.toFixed(2),
+        },
+      })),
+      total: results.total,
+    });
+  })
+);
 app.use("/api/audio", audioRoutes);
 app.use("/api/lyrics", lyricsRoutes);
 app.use("/api/health", healthRoutes);
@@ -49,6 +97,348 @@ app.get("/", (req, res) => {
       lyrics: "/api/lyrics",
       health: "/api/health",
     },
+  });
+});
+
+app.get(
+  "/api/stream/:videoId",
+  asyncHandler(async (req, res) => {
+    const { videoId } = req.params;
+    const { quality = "best" } = req.query;
+
+    console.log(`🎵 Stream request: ${videoId} (quality: ${quality})`);
+
+    const audioData = await ytmusicService.getAudioURLs(videoId);
+
+    if (!audioData.success) {
+      return res.status(404).json({
+        success: false,
+        error: audioData.error || "Failed to extract audio URL",
+      });
+    }
+
+    // Select quality
+    let selectedFormat;
+    switch (quality) {
+      case "high":
+        selectedFormat = audioData.audioByQuality.high || audioData.bestAudio;
+        break;
+      case "medium":
+        selectedFormat = audioData.audioByQuality.medium || audioData.bestAudio;
+        break;
+      case "low":
+        selectedFormat = audioData.audioByQuality.low || audioData.bestAudio;
+        break;
+      default:
+        selectedFormat = audioData.bestAudio;
+    }
+
+    res.json({
+      success: true,
+      videoId,
+      stream_url: selectedFormat.url,
+      expires_at: audioData.expiresAt,
+      metadata: {
+        title: audioData.title,
+        author: audioData.author,
+        duration: audioData.duration,
+        thumbnail: audioData.thumbnail?.url || null,
+      },
+      quality: {
+        selected: selectedFormat.quality,
+        bitrate: selectedFormat.bitrate,
+        codec: selectedFormat.codec,
+        sampleRate: selectedFormat.sampleRate,
+      },
+      available_qualities: {
+        high: audioData.audioByQuality.high
+          ? {
+              bitrate: audioData.audioByQuality.high.bitrate,
+              quality: audioData.audioByQuality.high.quality,
+            }
+          : null,
+        medium: audioData.audioByQuality.medium
+          ? {
+              bitrate: audioData.audioByQuality.medium.bitrate,
+              quality: audioData.audioByQuality.medium.quality,
+            }
+          : null,
+        low: audioData.audioByQuality.low
+          ? {
+              bitrate: audioData.audioByQuality.low.bitrate,
+              quality: audioData.audioByQuality.low.quality,
+            }
+          : null,
+      },
+    });
+  })
+);
+
+// Proxy stream endpoint (to hide direct URL)
+app.get(
+  "/api/proxy/:videoId",
+  asyncHandler(async (req, res) => {
+    const { videoId } = req.params;
+    const { quality = "best" } = req.query;
+
+    console.log(`🔄 Proxy stream request: ${videoId}`);
+
+    const audioData = await ytmusicService.getAudioURLs(videoId);
+
+    if (!audioData.success) {
+      return res.status(404).json({
+        success: false,
+        error: "Failed to get audio URL",
+      });
+    }
+
+    // Select quality
+    let selectedFormat;
+    switch (quality) {
+      case "high":
+        selectedFormat = audioData.audioByQuality.high || audioData.bestAudio;
+        break;
+      case "medium":
+        selectedFormat = audioData.audioByQuality.medium || audioData.bestAudio;
+        break;
+      case "low":
+        selectedFormat = audioData.audioByQuality.low || audioData.bestAudio;
+        break;
+      default:
+        selectedFormat = audioData.bestAudio;
+    }
+
+    // Stream the audio through our server
+    const https = await import("https");
+    const { URL } = await import("url");
+
+    const audioUrl = new URL(selectedFormat.url);
+
+    const options = {
+      hostname: audioUrl.hostname,
+      port: 443,
+      path: audioUrl.pathname + audioUrl.search,
+      method: "GET",
+      headers: {
+        "User-Agent":
+          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        Range: req.headers.range || "bytes=0-",
+      },
+    };
+
+    const proxyReq = https.request(options, (proxyRes) => {
+      // Set appropriate headers
+      res.setHeader("Content-Type", selectedFormat.mimeType || "audio/mp4");
+      res.setHeader("Content-Length", proxyRes.headers["content-length"]);
+      res.setHeader("Accept-Ranges", "bytes");
+      res.setHeader("Cache-Control", "public, max-age=3600");
+
+      if (proxyRes.headers["content-range"]) {
+        res.setHeader("Content-Range", proxyRes.headers["content-range"]);
+        res.status(206);
+      }
+
+      proxyRes.pipe(res);
+    });
+
+    proxyReq.on("error", (error) => {
+      console.error("Proxy error:", error);
+      res.status(500).json({
+        success: false,
+        error: "Failed to proxy audio stream",
+      });
+    });
+
+    req.on("close", () => {
+      proxyReq.destroy();
+    });
+
+    proxyReq.end();
+  })
+);
+
+// Search with audio URLs
+app.get(
+  "/api/search-with-audio",
+  asyncHandler(async (req, res) => {
+    const { q: query, limit = 5, maxAudioFetches = 3 } = req.query;
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        error: 'Query parameter "q" is required',
+      });
+    }
+
+    console.log(`🔍🎵 Search with audio: "${query}"`);
+
+    const results = await ytmusicService.searchWithAudio(query, {
+      limit: parseInt(limit),
+      maxAudioFetches: parseInt(maxAudioFetches),
+    });
+
+    res.json({
+      success: true,
+      query,
+      results: results.items.map((item) => ({
+        id: item.videoId,
+        title: item.title,
+        artist: item.artists?.[0]?.name || "Unknown",
+        duration: item.duration,
+        thumbnail: item.thumbnails?.[0]?.url || null,
+        score: item.totalScore?.toFixed(2),
+        audioData: item.audioData
+          ? {
+              url: item.audioData.directURL,
+              quality: item.audioData.quality,
+              bitrate: item.audioData.bitrate,
+              expiresAt: item.audioData.expiresAt,
+            }
+          : null,
+      })),
+    });
+  })
+);
+
+// Advanced search endpoint
+app.get(
+  "/api/search/advanced",
+  asyncHandler(async (req, res) => {
+    const {
+      q: query,
+      contentType = "all",
+      minDuration = 0,
+      maxDuration = 999999,
+      quality = "all",
+      sortBy = "relevance",
+    } = req.query;
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        error: 'Query parameter "q" is required',
+      });
+    }
+
+    console.log(`🔍✨ Advanced search: "${query}"`);
+
+    const results = await ytmusicService.advancedSearch(query, {
+      contentType,
+      minDuration: parseInt(minDuration),
+      maxDuration: parseInt(maxDuration),
+      quality,
+      sortBy,
+    });
+
+    res.json({
+      success: true,
+      query,
+      filters: results.filters,
+      results: results.items.map((item) => ({
+        id: item.videoId,
+        title: item.title,
+        artist: item.artists?.[0]?.name || "Unknown",
+        duration: item.duration,
+        thumbnail: item.thumbnails?.[0]?.url || null,
+        scores: item.scores,
+      })),
+    });
+  })
+);
+
+// Quick search endpoint
+app.get(
+  "/api/search/quick",
+  asyncHandler(async (req, res) => {
+    const { q: query } = req.query;
+
+    if (!query) {
+      return res.status(400).json({
+        success: false,
+        error: 'Query parameter "q" is required',
+      });
+    }
+
+    console.log(`⚡ Quick search: "${query}"`);
+
+    const results = await ytmusicService.quickSearch(query);
+
+    res.json({
+      success: true,
+      query,
+      results: results.items.map((item) => ({
+        id: item.videoId,
+        title: item.title,
+        artist: item.artists?.[0]?.name || "Unknown",
+        duration: item.duration,
+        thumbnail: item.thumbnails?.[0]?.url || null,
+      })),
+    });
+  })
+);
+
+// Refresh audio URL endpoint (for expired URLs)
+app.get(
+  "/api/refresh/:videoId",
+  asyncHandler(async (req, res) => {
+    const { videoId } = req.params;
+
+    console.log(`🔄 Refresh audio URL: ${videoId}`);
+
+    // Clear cache for this video
+    await ytmusicService.clearCache();
+
+    // Get fresh URL
+    const audioData = await ytmusicService.getAudioURLs(videoId);
+
+    if (!audioData.success) {
+      return res.status(404).json({
+        success: false,
+        error: "Failed to refresh audio URL",
+      });
+    }
+
+    res.json({
+      success: true,
+      videoId,
+      stream_url: audioData.bestAudio.url,
+      expires_at: audioData.expiresAt,
+      refreshed_at: new Date().toISOString(),
+    });
+  })
+);
+
+// Clear cache endpoint
+app.post(
+  "/api/cache/clear",
+  asyncHandler(async (req, res) => {
+    await ytmusicService.clearCache();
+
+    res.json({
+      success: true,
+      message: "Cache cleared successfully",
+    });
+  })
+);
+
+// Error handling middleware
+app.use((error, req, res, next) => {
+  console.error("Error:", error);
+
+  res.status(error.statusCode || 500).json({
+    success: false,
+    error: error.message || "Internal server error",
+    ...(process.env.NODE_ENV === "development" && {
+      stack: error.stack,
+    }),
+  });
+});
+
+// 404 handler
+app.use((req, res) => {
+  res.status(404).json({
+    success: false,
+    error: "Endpoint not found",
   });
 });
 

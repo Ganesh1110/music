@@ -1,4 +1,9 @@
+import fs from "fs";
 import YTMusicAdvanced from "ytmusic-advanced";
+
+const proxyList = process.env.PROXY_LIST_PATH
+  ? JSON.parse(fs.readFileSync(process.env.PROXY_LIST_PATH, "utf8"))
+  : [];
 
 class YTMusicService {
   constructor() {
@@ -12,10 +17,12 @@ class YTMusicService {
     try {
       this.client = await YTMusicAdvanced.initialize({
         cacheEnabled: true,
-        language: "en",
-        country: "US",
-        timeout: 30000,
+        timeout: 20000,
+        enableIPRotation: process.env.ENABLE_IP_ROTATION === "true",
+        proxyList,
         maxRetries: 3,
+        retryDelay: 1000,
+        cacheTTL: 300000,
       });
 
       this.initialized = true;
