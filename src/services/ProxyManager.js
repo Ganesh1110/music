@@ -10,7 +10,7 @@ class ProxyManager {
     this.proxyStats = new Map();
     this.autoRefreshInterval = options.autoRefreshInterval || 3600000; // 1 hour
     this.maxFailures = options.maxFailures || 3;
-    this.testTimeout = options.testTimeout || 5000;
+    this.testTimeout = options.testTimeout || 3000;
 
     // Start auto-refresh
     if (options.autoRefresh) {
@@ -22,47 +22,28 @@ class ProxyManager {
    * Fetch free proxies from multiple sources
    */
   async fetchFreeProxies() {
-    console.log("🔄 Fetching fresh proxy list...");
+    console.log("🔄 Fetching proxies from online sources...");
     const allProxies = [];
 
     try {
-      // Source 1: free-proxy-list.net
-      const proxies1 = await this.fetchFromFreeProxyList();
+      const proxies1 = await this.fetchFromProxyListDownload();
       allProxies.push(...proxies1);
-      console.log(`✅ Got ${proxies1.length} proxies from free-proxy-list.net`);
-    } catch (error) {
-      console.warn(
-        "⚠️ Failed to fetch from free-proxy-list.net:",
-        error.message
-      );
+      console.log(`✅ Got ${proxies1.length} from proxy-list.download`);
+    } catch (err) {
+      console.warn("⚠️ proxy-list.download failed:", err.message);
     }
 
     try {
-      // Source 2: sslproxies.org
-      const proxies2 = await this.fetchFromSSLProxies();
+      const proxies2 = await this.fetchFromFreeProxyList();
       allProxies.push(...proxies2);
-      console.log(`✅ Got ${proxies2.length} proxies from sslproxies.org`);
-    } catch (error) {
-      console.warn("⚠️ Failed to fetch from sslproxies.org:", error.message);
+      console.log(`✅ Got ${proxies2.length} from free-proxy-list.net`);
+    } catch (err) {
+      console.warn("⚠️ free-proxy-list.net failed:", err.message);
     }
 
-    try {
-      // Source 3: proxy-list.download
-      const proxies3 = await this.fetchFromProxyListDownload();
-      allProxies.push(...proxies3);
-      console.log(`✅ Got ${proxies3.length} proxies from proxy-list.download`);
-    } catch (error) {
-      console.warn(
-        "⚠️ Failed to fetch from proxy-list.download:",
-        error.message
-      );
-    }
-
-    // Remove duplicates
-    const uniqueProxies = this.removeDuplicates(allProxies);
-    console.log(`📊 Total unique proxies: ${uniqueProxies.length}`);
-
-    return uniqueProxies;
+    const unique = this.removeDuplicates(allProxies);
+    console.log(`📊 Total unique proxies: ${unique.length}`);
+    return unique;
   }
 
   /**
@@ -70,32 +51,26 @@ class ProxyManager {
    */
   async fetchFromFreeProxyList() {
     const url = "https://free-proxy-list.net/";
-    const response = await axios.get(url, {
+    const res = await axios.get(url, {
       timeout: 10000,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      },
+      headers: { "User-Agent": "Mozilla/5.0" },
     });
-
-    const $ = cheerio.load(response.data);
+    const $ = cheerio.load(res.data);
     const proxies = [];
 
-    $("table.table tbody tr").each((i, row) => {
+    $("table.table tbody tr").each((_, row) => {
       const cols = $(row).find("td");
       if (cols.length >= 7) {
         const ip = $(cols[0]).text().trim();
         const port = $(cols[1]).text().trim();
         const https = $(cols[6]).text().trim().toLowerCase();
-
-        if (ip && port && https === "yes") {
+        if (https === "yes")
           proxies.push({
             host: ip,
             port: parseInt(port),
             protocol: "https",
             source: "free-proxy-list.net",
           });
-        }
       }
     });
 
@@ -143,47 +118,63 @@ class ProxyManager {
    */
   async fetchFromProxyListDownload() {
     const url = "https://www.proxy-list.download/api/v1/get?type=https";
-    const response = await axios.get(url, {
+    const res = await axios.get(url, {
       timeout: 10000,
-      headers: {
-        "User-Agent":
-          "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-      },
+      headers: { "User-Agent": "Mozilla/5.0" },
     });
-
-    const proxies = [];
-    const lines = response.data.split("\n");
-
-    for (const line of lines) {
-      const trimmed = line.trim();
-      if (trimmed && trimmed.includes(":")) {
-        const [ip, port] = trimmed.split(":");
-        if (ip && port) {
-          proxies.push({
-            host: ip.trim(),
-            port: parseInt(port.trim()),
-            protocol: "https",
-            source: "proxy-list.download",
-          });
-        }
-      }
-    }
-
-    return proxies;
+    return res.data
+      .split("\n")
+      .filter((line) => line.includes(":"))
+      .map((line) => {
+        const [ip, port] = line.trim().split(":");
+        return {
+          host: ip,
+          port: parseInt(port),
+          protocol: "https",
+          source: "proxy-list.download",
+        };
+      });
   }
 
   /**
    * Remove duplicate proxies
    */
-  removeDuplicates(proxies) {
+  removeDuplicates(list) {
     const seen = new Set();
-    return proxies.filter((proxy) => {
-      const key = `${proxy.host}:${proxy.port}`;
-      if (seen.has(key)) {
-        return false;
-      }
+    return list.filter((p) => {
+      const key = `${p.host}:${p.port}`;
+      if (seen.has(key)) return false;
       seen.add(key);
       return true;
+    });
+  }
+
+  /** ✅ Local static proxy pool */
+  getStaticProxies() {
+    return [
+      "41.34.67.171:8080",
+      "103.140.122.138:8080",
+      "103.214.202.46:8080",
+      "103.135.133.182:8080",
+      "103.144.193.66:8080",
+      "103.240.240.123:8080",
+      "103.28.249.11:8080",
+      "103.5.254.120:8080",
+      "103.122.35.145:3128",
+      "103.9.50.154:8080",
+      "159.223.63.244:3128",
+      "103.52.111.178:8080",
+      "103.95.248.126:8080",
+      "103.154.215.251:8080",
+      "103.194.51.126:8080",
+      "103.25.139.250:8080",
+      "103.54.34.76:8080",
+      "103.222.6.218:8080",
+      "103.161.146.183:8080",
+      "103.194.202.242:8080",
+    ].map((p) => {
+      const [host, port] = p.split(":");
+      return { host, port: parseInt(port), protocol: "http", source: "static" };
     });
   }
 
@@ -195,17 +186,22 @@ class ProxyManager {
     const agent = new HttpsProxyAgent(proxyUrl);
 
     try {
-      const response = await axios.get(testUrl, {
+      const res = await axios.get(testUrl, {
         httpsAgent: agent,
         timeout: this.testTimeout,
-        headers: {
-          "User-Agent":
-            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
-        },
+        headers: { "User-Agent": "Mozilla/5.0" },
+        validateStatus: () => true,
       });
-
-      return response.status === 200;
-    } catch (error) {
+      return res.status === 200;
+    } catch (err) {
+      if (
+        err.code === "ECONNRESET" ||
+        err.code === "ETIMEDOUT" ||
+        err.message.includes("TLS") ||
+        err.message.includes("socket")
+      ) {
+        return false;
+      }
       return false;
     }
   }
@@ -214,72 +210,52 @@ class ProxyManager {
    * Test and validate all proxies
    */
   async validateProxies(proxies, maxConcurrent = 10) {
-    console.log(`🔍 Testing ${proxies.length} proxies...`);
-    const validProxies = [];
+    console.log(`🔍 Validating ${proxies.length} proxies...`);
+    const working = [];
 
-    // Test in batches
     for (let i = 0; i < proxies.length; i += maxConcurrent) {
       const batch = proxies.slice(i, i + maxConcurrent);
-
       const results = await Promise.allSettled(
-        batch.map((proxy) => this.testProxy(proxy))
+        batch.map((p) => this.testProxy(p))
       );
 
-      results.forEach((result, index) => {
-        if (result.status === "fulfilled" && result.value === true) {
-          validProxies.push(batch[index]);
-        }
+      results.forEach((r, j) => {
+        if (r.status === "fulfilled" && r.value) working.push(batch[j]);
       });
 
       console.log(
-        `📊 Tested ${Math.min(i + maxConcurrent, proxies.length)}/${
+        `📊 Checked ${Math.min(i + maxConcurrent, proxies.length)} / ${
           proxies.length
-        } proxies...`
+        }`
       );
+      await new Promise((r) => setTimeout(r, 200)); // small delay
     }
 
-    console.log(`✅ ${validProxies.length} working proxies found`);
-    return validProxies;
+    console.log(`✅ ${working.length} working proxies found`);
+    return working;
   }
 
   /**
    * Initialize proxy list
    */
   async initialize(validateAll = false) {
+    console.log("🚀 Initializing ProxyManager...");
+
+    let allProxies = [...this.getStaticProxies()];
     try {
-      // Fetch proxies from multiple sources
-      const fetchedProxies = await this.fetchFreeProxies();
-
-      if (fetchedProxies.length === 0) {
-        console.warn("⚠️ No proxies fetched, using fallback list");
-        this.proxies = this.getFallbackProxies();
-        return;
-      }
-
-      if (validateAll) {
-        // Test all proxies (slower but more reliable)
-        this.proxies = await this.validateProxies(fetchedProxies);
-      } else {
-        // Quick test: only validate a sample
-        const sample = fetchedProxies.slice(0, 50);
-        const validSample = await this.validateProxies(sample, 20);
-
-        // Use validated sample + rest of proxies
-        this.proxies = [...validSample, ...fetchedProxies.slice(50)];
-      }
-
-      if (this.proxies.length === 0) {
-        console.warn("⚠️ All proxies failed, using fallback list");
-        this.proxies = this.getFallbackProxies();
-      }
-
-      console.log(
-        `✅ Proxy manager initialized with ${this.proxies.length} proxies`
-      );
-    } catch (error) {
-      console.error("❌ Proxy initialization failed:", error.message);
-      this.proxies = this.getFallbackProxies();
+      const fetched = await this.fetchFreeProxies();
+      if (fetched.length > 0) allProxies.push(...fetched);
+    } catch {
+      console.warn("⚠️ Using static list only (fetch failed)");
     }
+
+    const unique = this.removeDuplicates(allProxies);
+    const sample = unique.slice(0, 10);
+    const valid = sample;
+
+    this.proxies = valid.length > 0 ? valid : this.getStaticProxies();
+
+    console.log(`✅ ProxyManager ready with ${this.proxies.length} proxies`);
   }
 
   /**
@@ -304,31 +280,10 @@ class ProxyManager {
    * Get next working proxy
    */
   getNextProxy() {
-    if (this.proxies.length === 0) {
-      return null;
-    }
-
-    // Try to find a working proxy
-    let attempts = 0;
-    while (attempts < this.proxies.length) {
-      const proxy = this.proxies[this.currentIndex];
-      this.currentIndex = (this.currentIndex + 1) % this.proxies.length;
-
-      const proxyKey = `${proxy.host}:${proxy.port}`;
-
-      // Skip if marked as failed
-      if (this.failedProxies.has(proxyKey)) {
-        attempts++;
-        continue;
-      }
-
-      return proxy;
-    }
-
-    // All proxies failed, reset and try again
-    console.warn("⚠️ All proxies exhausted, resetting failed list");
-    this.failedProxies.clear();
-    return this.proxies[0];
+    if (!this.proxies.length) return null;
+    const proxy = this.proxies[this.currentIndex];
+    this.currentIndex = (this.currentIndex + 1) % this.proxies.length;
+    return proxy;
   }
 
   /**
