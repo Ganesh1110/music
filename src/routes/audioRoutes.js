@@ -2,78 +2,180 @@ import express from "express";
 import {
   getAudioURLs,
   getAudioStream,
-  getAudioWithProxy,
+  getBatchAudioURLs,
+  getProxyStats,
+  refreshProxies,
+  testAudioExtraction,
+  audioHealthCheck,
+  streamAudio,
 } from "../controllers/audioController.js";
 
 const router = express.Router();
 
+/**
+ * @swagger
+ * /audio/{videoId}:
+ *   get:
+ *     summary: Get audio URLs for a video (Enhanced with Proxy Support)
+ *     description: Extract direct audio URLs using multiple strategies and proxy rotation
+ *     tags: [Audio]
+ *     parameters:
+ *       - in: path
+ *         name: videoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *         description: YouTube video ID (11 characters)
+ *     responses:
+ *       200:
+ *         description: Audio URLs extracted successfully
+ *       404:
+ *         description: Audio extraction failed
+ *       500:
+ *         description: Server error
+ */
 router.get("/:videoId", getAudioURLs);
-router.get("/:videoId/stream", getAudioStream);
-router.get("/:videoId/proxy", getAudioWithProxy);
 
 /**
- * Audio download endpoint
+ * @swagger
+ * /audio/{videoId}/stream:
+ *   get:
+ *     summary: Get audio stream URL with quality selection
+ *     description: Get optimized audio stream for specific quality
+ *     tags: [Audio]
+ *     parameters:
+ *       - in: path
+ *         name: videoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *           enum: [high, medium, low]
+ *           default: high
+ *     responses:
+ *       200:
+ *         description: Stream URL retrieved
  */
-router.get("/api/audio/:videoId/download", async (req, res) => {
-  try {
-    const { videoId } = req.params;
+router.get("/:videoId/stream", getAudioStream);
 
-    // Get fresh audio URL using YTMusicAdvanced
-    const ytmusicService = await import("./services/ytmusicService.js");
-    const audioData = await ytmusicService.default.getAudioURLs(videoId);
+/**
+ * @swagger
+ * /audio/{videoId}/play:
+ *   get:
+ *     summary: Direct audio streaming (proxied)
+ *     description: Stream audio directly through the server (hides YouTube URL)
+ *     tags: [Audio]
+ *     parameters:
+ *       - in: path
+ *         name: videoId
+ *         required: true
+ *         schema:
+ *           type: string
+ *       - in: query
+ *         name: quality
+ *         schema:
+ *           type: string
+ *           enum: [high, medium, low]
+ *           default: high
+ *     responses:
+ *       200:
+ *         description: Audio stream
+ *         content:
+ *           audio/webm:
+ *             schema:
+ *               type: string
+ *               format: binary
+ */
+router.get("/:videoId/play", streamAudio);
 
-    if (!audioData.success || !audioData.bestAudio) {
-      return res.status(404).json({
-        error: "Audio not found",
-      });
-    }
+/**
+ * @swagger
+ * /audio/batch:
+ *   post:
+ *     summary: Batch audio URL extraction
+ *     description: Extract audio URLs for multiple videos (max 20)
+ *     tags: [Audio]
+ *     requestBody:
+ *       required: true
+ *       content:
+ *         application/json:
+ *           schema:
+ *             type: object
+ *             required:
+ *               - videoIds
+ *             properties:
+ *               videoIds:
+ *                 type: array
+ *                 items:
+ *                   type: string
+ *                 maxItems: 20
+ *     responses:
+ *       200:
+ *         description: Batch extraction completed
+ */
+router.post("/batch", getBatchAudioURLs);
 
-    const bestAudio = audioData.bestAudio;
+/**
+ * @swagger
+ * /audio/proxy/stats:
+ *   get:
+ *     summary: Get proxy statistics
+ *     description: Get detailed statistics about proxy performance
+ *     tags: [Audio, Proxy]
+ *     responses:
+ *       200:
+ *         description: Proxy statistics
+ */
+router.get("/proxy/stats", getProxyStats);
 
-    // Set download headers
-    const filename = `${audioData.title || "audio"}.${getFileExtension(
-      bestAudio.mimeType
-    )}`;
+/**
+ * @swagger
+ * /audio/proxy/refresh:
+ *   post:
+ *     summary: Refresh proxy list
+ *     description: Manually trigger proxy list refresh
+ *     tags: [Audio, Proxy]
+ *     responses:
+ *       200:
+ *         description: Proxy list refreshed
+ */
+router.post("/proxy/refresh", refreshProxies);
 
-    res.set({
-      "Content-Type": bestAudio.mimeType,
-      "Content-Disposition": `attachment; filename="${filename}"`,
-      "Content-Length": bestAudio.contentLength || "",
-      "Cache-Control": "no-cache",
-    });
+/**
+ * @swagger
+ * /audio/test:
+ *   get:
+ *     summary: Test audio extraction
+ *     description: Test audio extraction with detailed logging
+ *     tags: [Audio, Testing]
+ *     parameters:
+ *       - in: query
+ *         name: videoId
+ *         schema:
+ *           type: string
+ *           default: dQw4w9WgXcQ
+ *     responses:
+ *       200:
+ *         description: Test results
+ */
+router.get("/test", testAudioExtraction);
 
-    // Stream the audio directly with proper headers
-    const response = await fetch(bestAudio.url, {
-      headers: {
-        "User-Agent": getRandomUserAgent(),
-        Accept: "*/*",
-        Range: "bytes=0-",
-        Referer: "https://www.youtube.com/",
-      },
-    });
-
-    if (!response.ok) {
-      throw new Error(`Download failed: ${response.status}`);
-    }
-
-    response.body.pipe(res);
-  } catch (error) {
-    console.error("❌ Download error:", error.message);
-    res.status(500).json({
-      error: "Download failed",
-      message: error.message,
-    });
-  }
-});
-
-function getFileExtension(mimeType) {
-  const extensions = {
-    "audio/webm": "webm",
-    "audio/mp4": "m4a",
-    "audio/mpeg": "mp3",
-    "audio/mp3": "mp3",
-  };
-  return extensions[mimeType] || "audio";
-}
+/**
+ * @swagger
+ * /audio/health:
+ *   get:
+ *     summary: Audio service health check
+ *     description: Check health of audio extraction service including proxy status
+ *     tags: [Audio, Health]
+ *     responses:
+ *       200:
+ *         description: Service is healthy
+ *       503:
+ *         description: Service is unhealthy
+ */
+router.get("/health", audioHealthCheck);
 
 export default router;
